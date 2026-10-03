@@ -28,12 +28,14 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"      # comma-separated EXACT origins, e.g. https://app.netlify.app (never "*")
     cors_origin_regex: str = ""                      # optional, for Netlify deploy previews, e.g. https://.*--agroai\.netlify\.app
 
-    email_backend: Literal["console", "smtp"] = "console"
+    email_backend: Literal["console", "smtp", "brevo"] = "console"
     expose_dev_otp: bool = False
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
+    brevo_api_key: SecretStr = SecretStr("")           # backend-only secret for EMAIL_BACKEND=brevo (HTTPS API; works where SMTP ports are blocked)
+    brevo_base_url: str = "https://api.brevo.com"
     email_from: str = "AGRO AI <no-reply@agroai.local>"
 
     otp_ttl_minutes: int = 10
@@ -108,7 +110,9 @@ class Settings(BaseSettings):
         w = []
         if self.environment == "production":
             if self.email_backend == "console":
-                w.append("EMAIL_BACKEND=console: verification codes are only printed to the log, so new users cannot register. Configure SMTP.")
+                w.append("EMAIL_BACKEND=console: verification codes are only printed to the log, so new users cannot register. Configure SMTP or Brevo.")
+            if self.email_backend == "brevo" and not self.brevo_api_key.get_secret_value().strip():
+                w.append("EMAIL_BACKEND=brevo but BREVO_API_KEY is not set: verification emails cannot be sent.")
             if not self.gemini_configured:
                 w.append("GEMINI_API_KEY is not set: analyses will show only the basic model result.")
             if any("localhost" in o or "127.0.0.1" in o for o in self.cors_origin_list):

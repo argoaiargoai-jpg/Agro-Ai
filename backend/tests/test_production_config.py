@@ -91,7 +91,7 @@ def test_every_setting_is_documented_in_env_example():
     internal = {"APP_NAME", "API_PREFIX"}
     missing = {n.upper() for n in Settings.model_fields} - documented - internal
     assert not missing, f"undocumented settings: {sorted(missing)}"
-    assert not re.search(r"(?im)^(SECRET_KEY|GEMINI_API_KEY|ADMIN_PASSWORD|SMTP_PASSWORD|GOOGLE_CLIENT_SECRET)=\S", text), "an example file must not carry values for secrets"
+    assert not re.search(r"(?im)^(SECRET_KEY|GEMINI_API_KEY|ADMIN_PASSWORD|SMTP_PASSWORD|BREVO_API_KEY|GOOGLE_CLIENT_SECRET)=\S", text), "an example file must not carry values for secrets"
 
 
 def test_frontend_env_example_documents_every_variable_the_frontend_reads():
