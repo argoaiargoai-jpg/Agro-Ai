@@ -17,7 +17,8 @@ const STEPS = [
   { icon: CloudUpload, title: 'Analyze', text: 'AGRO AI processes the image and prepares a plain-language health report.' },
   { icon: CheckCircle2, title: 'Act', text: 'Review findings, keep them in your history, and share with your agronomist.' },
 ]
-const CROPS = ['Tomato', 'Potato', 'Maize', 'Rice', 'Wheat', 'Cotton', 'Soybean', 'Chilli', 'Sugarcane', 'Banana']
+// The crops our specialized AGRO AI ML model is trained on (see /ml/info). Other plants get AI-powered analysis only.
+const CROPS = ['Tomato', 'Potato', 'Corn', 'Apple', 'Grape', 'Peach', 'Cherry', 'Strawberry', 'Soybean', 'Bell Pepper']
 const WHY = ['Spot problems days earlier than a walk-through', 'One place for every photo, note and field check', 'Share clear records with agronomists and advisors', 'Simple enough for the whole farm team']
 
 export default function Landing() {
@@ -122,8 +123,8 @@ export default function Landing() {
 
         <section className="section" id="crops" style={{ paddingTop: 20 }}>
           <div className="container">
-            <Reveal className="section-head"><h2>Built around the crops you grow</h2><p>Start with the staples and expand as the platform grows.</p></Reveal>
-            <Reveal variant="zoom" className="crops">{CROPS.slice(0, 6).map((c) => <span key={c} className="crop-chip"><LeafIcon size={16} /> {c}</span>)}</Reveal>
+            <Reveal className="section-head"><h2>Crops our ML model is trained on</h2><p>The AGRO AI ML model is specialized for these crops. For other plants, AGRO AI&rsquo;s AI-powered analysis still gives guidance, with less certainty.</p></Reveal>
+            <Reveal variant="zoom" className="crops">{CROPS.map((c) => <span key={c} className="crop-chip"><LeafIcon size={16} /> {c}</span>)}</Reveal>
           </div>
         </section>
 
