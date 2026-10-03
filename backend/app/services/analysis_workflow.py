@@ -167,7 +167,9 @@ def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Setting
                 ai = _validated(fallback.analyze(request))
             except ProviderError as exc2:
                 evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": exc2.ai_status})
-                log.warning("OpenRouter fallback failed (%s); using the latest specialist result if there is one", exc2.ai_status)
+                from app.ai.safety import redact
+                log.warning("OpenRouter fallback failed (%s): %s; using the latest specialist result if there is one", exc2.ai_status,
+                            redact(exc2.detail, settings.secret_values()))
             else:
                 evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": "ok"})
                 log.warning("AI guidance came from the OpenRouter fallback because Gemini failed (%s)", exc.ai_status)

@@ -242,3 +242,43 @@ def test_10_the_openrouter_key_never_reaches_logs_or_responses(client, user_auth
     aid, ra = analyze(client, admin_auth)
     assert ORKEY not in caplog.text and ORKEY not in r.text and ORKEY not in ra.text
     assert ORKEY not in client.get(f"{V}/analyses/{aid}", headers=admin_auth).text and K1 not in caplog.text and K2 not in caplog.text
+
+
+# ------------------------------------------------------------------------------------------- diagnosable failures (what did OpenRouter actually say?)
+def test_an_unusable_200_answer_is_described_with_status_type_model_and_snippet():
+    resp = httpx.Response(200, json={"model": "nvidia/some-safety-model:free", "choices": [{"finish_reason": "length", "message": {"content": "safe", "reasoning": "thinking..."}}]})
+    with pytest.raises(ProviderBadResponse) as e:
+        OpenRouterProvider(S(), Rec(resp).transport).analyze(REQ)
+    d = e.value.detail
+    assert "not a JSON object" in d and "HTTP 200" in d and "application/json" in d and "model=nvidia/some-safety-model:free" in d and "finish=length" in d and "'safe'" in d
+
+
+def test_an_empty_content_answer_shows_the_models_reasoning_snippet_and_why_it_stopped():
+    resp = httpx.Response(200, json={"model": "x/reasoner:free", "choices": [{"finish_reason": "length", "message": {"content": None, "reasoning": "Let me think about the leaf..."}}]})
+    with pytest.raises(ProviderBadResponse) as e:
+        OpenRouterProvider(S(), Rec(resp).transport).analyze(REQ)
+    assert "empty answer" in e.value.detail and "finish=length" in e.value.detail and "Let me think" in e.value.detail
+
+
+def test_a_non_json_body_is_described():
+    with pytest.raises(ProviderBadResponse) as e:
+        OpenRouterProvider(S(), Rec(httpx.Response(200, text="<html>gateway</html>", headers={"content-type": "text/html"})).transport).analyze(REQ)
+    assert "text/html" in e.value.detail and "gateway" in e.value.detail
+
+
+def test_http_errors_are_logged_with_status_type_and_body_but_no_key_or_image(caplog):
+    caplog.set_level(logging.WARNING)
+    resp = httpx.Response(400, json={"error": {"code": 400, "message": "bad param " + ORKEY}})
+    with pytest.raises(ProviderBadResponse):
+        OpenRouterProvider(S(), Rec(resp).transport).analyze(REQ)
+    assert "OpenRouter HTTP 400" in caplog.text and "application/json" in caplog.text and "bad param" in caplog.text
+    assert ORKEY not in caplog.text and base64.b64encode(IMG).decode()[:30] not in caplog.text
+
+
+def test_the_workflow_log_for_a_failed_fallback_shows_the_reason_with_the_key_removed(client, user_auth, world, caplog):
+    caplog.set_level(logging.WARNING)
+    world["or"].response = httpx.Response(200, json={"model": "m:free", "choices": [{"finish_reason": "stop", "message": {"content": "I cannot help " + ORKEY}}]})
+    use_gemini(Wire({K1: [503], K2: [503]}))
+    analyze(client, user_auth)
+    assert "OpenRouter fallback failed (bad_response)" in caplog.text and "model=m:free" in caplog.text and "I cannot help" in caplog.text
+    assert ORKEY not in caplog.text
