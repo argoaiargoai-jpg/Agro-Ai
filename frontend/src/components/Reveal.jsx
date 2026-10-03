@@ -29,6 +29,8 @@ export function CountUp({ value, duration = 900 }) {
   const [n, setN] = useState(0)
   useEffect(() => {
     if (typeof value !== 'number') return
+    // No animation when the tab is hidden (rAF is paused there) or the user prefers reduced motion: show the real number at once.
+    if (document.hidden || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { setN(value); return }
     let raf, start
     const tick = (t) => {
       start ??= t

@@ -33,3 +33,24 @@ class AnalysisPage(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+INTERNAL_RESULT_KEYS = ("ai", "prompt_version", "ai_case")
+INTERNAL_FINAL_KEYS = ("disagreement", "disease_source", "ml_state")
+
+
+def present(analysis, is_admin: bool) -> "AnalysisOut":
+    """The API view of an analysis. Administrators get the full record; customers get the unified result only
+    (no provider output, ML-vs-AI disagreement, provider/model names or internal error codes)."""
+    out = AnalysisOut.model_validate(analysis)
+    if is_admin:
+        return out
+    result = dict(out.result) if out.result else out.result
+    if result:
+        for k in INTERNAL_RESULT_KEYS:
+            result.pop(k, None)
+        if isinstance(result.get("final"), dict):
+            result["final"] = {k: v for k, v in result["final"].items() if k not in INTERNAL_FINAL_KEYS}
+    out.result = result
+    out.ai_provider = out.ai_model = out.ai_error_code = None
+    return out

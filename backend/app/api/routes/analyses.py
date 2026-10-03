@@ -7,11 +7,16 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models import User
-from app.schemas.analysis import AnalysisOut, AnalysisPage
+from app.models.user import Role
+from app.schemas.analysis import AnalysisOut, AnalysisPage, present
 from app.schemas.auth import MessageOut
 from app.services import analysis_service
 
 router = APIRouter(prefix="/analyses", tags=["analyses"])
+
+
+def _admin(user: User) -> bool:
+    return user.role == Role.admin.value
 
 
 @router.post("", response_model=AnalysisOut, status_code=201)
@@ -23,7 +28,7 @@ def create_analysis(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return analysis_service.create(db, user, file, crop_type, source, notes)
+    return present(analysis_service.create(db, user, file, crop_type, source, notes), _admin(user))
 
 
 @router.get("", response_model=AnalysisPage)
@@ -36,13 +41,13 @@ def list_analyses(
     db: Session = Depends(get_db),
 ):
     items, total = analysis_service.list_for_user(db, user, page, page_size, status, q)
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    return {"items": [present(a, _admin(user)) for a in items], "total": total, "page": page, "page_size": page_size}
 
 
 @router.get("/summary")
 def summary(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     data = analysis_service.summary_for_user(db, user)
-    data["recent"] = [AnalysisOut.model_validate(a) for a in data["recent"]]
+    data["recent"] = [present(a, _admin(user)) for a in data["recent"]]
     return data
 
 
@@ -54,12 +59,12 @@ def analyze(
     db: Session = Depends(get_db),
 ):
     """Full analysis: our ML model (DISEASE | HEALTHY | UNKNOWN | NO_PLANT), then the selected AI provider for guidance."""
-    return analysis_service.run_analysis(db, user, analysis_id, force)
+    return present(analysis_service.run_analysis(db, user, analysis_id, force), _admin(user))
 
 
 @router.get("/{analysis_id}", response_model=AnalysisOut)
 def get_analysis(analysis_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return analysis_service.get_owned(db, user, analysis_id)
+    return present(analysis_service.get_owned(db, user, analysis_id), _admin(user))
 
 
 @router.get("/{analysis_id}/image")

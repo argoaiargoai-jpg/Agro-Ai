@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.core.security import utcnow
+from app.services import analysis_service
 from app.models import Analysis, AuditLog, Role, User
 from app.services import auth_service
 
@@ -26,6 +27,9 @@ def stats(db: Session) -> dict:
         "analyses_total": count(select(func.count()).select_from(Analysis)),
         "analyses_by_status": by_status,
         "signups_14d": [{"date": str(d), "count": c} for d, c in sorted(signups)],
+        **analysis_service.aggregate(db.execute(
+            select(Analysis.created_at, Analysis.result, Analysis.ai_status, Analysis.crop_type)
+            .order_by(Analysis.created_at.desc()).limit(analysis_service.SUMMARY_WINDOW)).all()),
     }
 
 

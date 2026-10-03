@@ -191,10 +191,10 @@ def analyze(client, headers, r):
 
 
 @needs_data
-def test_real_model_disease_goes_to_the_ai_as_advice_only(client, user_auth, sc):
+def test_real_model_disease_goes_to_the_ai_as_advice_only(client, admin_auth, sc):
     r = first_with_state(lambda r: r["label_out"] == "Tomato___Early_blight", "DISEASE")
     sc.respond(diseased("Something Else", ml_consistency="consistent"))
-    b = analyze(client, user_auth, r)
+    b = analyze(client, admin_auth, r)
     ml = b["result"]["ml"]
     assert ml["model_version"] == "colab" and ml["classification_type"] == "DISEASE" and (ml["crop"], ml["disease"]) == ("Tomato", "Early Blight")     # the real model
     f = b["result"]["final"]
@@ -215,10 +215,10 @@ def test_real_model_healthy_is_inspected_independently_by_the_ai(client, user_au
 
 
 @needs_data
-def test_real_model_healthy_but_ai_sees_disease_keeps_both_internally(client, user_auth, sc):
+def test_real_model_healthy_but_ai_sees_disease_keeps_both_internally(client, admin_auth, sc):
     r = first_with_state(lambda r: r["label_out"] == "Grape___healthy", "HEALTHY")
     sc.respond(diseased("Black Rot", crop="Grape", plant="Grape"))
-    b = analyze(client, user_auth, r)
+    b = analyze(client, admin_auth, r)
     f = b["result"]["final"]
     assert f["status"] == "DISEASE" and f["disease_source"] == "ai" and f["disagreement"] and b["result"]["ml"]["classification_type"] == "HEALTHY"
 

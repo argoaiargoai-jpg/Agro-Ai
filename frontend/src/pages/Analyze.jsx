@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Camera, CameraOff, ImagePlus, RefreshCw, UploadCloud, X } from 'lucide-react'
 import { PageHead } from '../components/AnalysisBits'
+import { ScanPreview, StageList } from '../components/Scan'
 import { Alert, Button, Field } from '../components/ui'
 import { useConfig } from '../context/ConfigContext'
 import { useToast } from '../context/ToastContext'
@@ -132,8 +133,11 @@ export default function Analyze() {
       poll = setInterval(async () => {
         try { const cur = await api.get(`/analyses/${a.id}`); if (cur.result?.stage === 'ml_done') setStage('guidance') } catch { /* keep waiting */ }
       }, 1000)
+      let ok = true
       try { await api.post(`/analyses/${a.id}/analyze`) }
-      catch (e) { toast(errorMessage(e), 'error') } // the result page explains the state and offers a retry
+      catch (e) { ok = false; toast(errorMessage(e), 'error') } // the result page explains the state and offers a retry
+      clearInterval(poll)
+      if (ok) { setStage('done'); await new Promise((r) => setTimeout(r, 650)) }   // show the finished state briefly: it is real, the backend has answered
       nav(`/analysis/${a.id}`)
     } catch (e) {
       setError(errorMessage(e))
@@ -144,16 +148,23 @@ export default function Analyze() {
 
   return (
     <>
-      <PageHead title="Analyze a crop" subtitle="Upload a clear, well-lit photo of a leaf or affected plant." />
+      <PageHead title="Analyze a crop" subtitle="Upload a plant image and let AGRO AI analyze it. A clear, well-lit photo of a single leaf works best." />
       <div className="grid grid-main">
         <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           {config.maintenance_mode && <Alert tone="warn">AGRO AI is in maintenance mode, so new uploads are paused.</Alert>}
           {error && <Alert tone="error">{error}</Alert>}
           {file ? (
-            <div className="preview">
-              <img src={preview} alt="Selected crop" />
-              <Button variant="secondary" size="sm" className="remove" icon={X} onClick={() => setFile(null)} aria-label="Remove image">Remove</Button>
-            </div>
+            busy ? (
+              <div className="analyze-hero">
+                <ScanPreview src={preview} active={stage !== 'done'} alt="Your image being analyzed" />
+                <StageList stage={stage || 'uploading'} />
+              </div>
+            ) : (
+              <div className="preview">
+                <img src={preview} alt="Selected crop" />
+                <Button variant="secondary" size="sm" className="remove" icon={X} onClick={() => setFile(null)} aria-label="Remove image">Remove</Button>
+              </div>
+            )
           ) : (
             <>
               <div className="tabs" role="tablist" style={{ alignSelf: 'flex-start' }}>
@@ -187,16 +198,9 @@ export default function Analyze() {
               {config.supported_crops.map((c) => <option key={c}>{c}</option>)}
             </Field>
             <Field as="textarea" label="Notes (optional)" maxLength={1000} placeholder="e.g. Yellow spots on lower leaves, started last week" value={notes} onChange={(e) => setNotes(e.target.value)} />
-            <Button type="submit" size="lg" block loading={busy} disabled={!file || config.maintenance_mode} icon={UploadCloud}>
-              {stage === 'uploading' ? 'Uploading…' : stage ? 'Analyzing…' : 'Analyze image'}
+            <Button type="submit" size="lg" block loading={busy && stage !== 'done'} disabled={!file || busy || config.maintenance_mode} icon={UploadCloud}>
+              {stage === 'uploading' ? 'Uploading…' : stage === 'done' ? 'Done' : stage ? 'Analyzing…' : 'Analyze image'}
             </Button>
-            {stage && (
-              <ol className="steps-live" aria-live="polite">
-                <li className="done">Image uploaded{stage === 'uploading' ? '…' : ''}</li>
-                <li className={stage === 'ml' ? 'now' : stage === 'guidance' ? 'done' : ''}>Our AI model is analyzing the image…</li>
-                <li className={stage === 'guidance' ? 'now' : ''}>Generating agricultural guidance…</li>
-              </ol>
-            )}
             <p className="field-hint">Your photo is stored privately and only visible to you.</p>
           </form>
         </div>

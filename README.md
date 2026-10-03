@@ -31,7 +31,8 @@ React (Vite)  ──HTTPS──▶  FastAPI  ──▶  SQL database (SQLite dev
 **How an analysis works:** upload → validated and stored → our model classifies it (`DISEASE/HEALTHY/UNKNOWN/NO_PLANT`) →
 the selected AI provider adds explanation/advice (for `DISEASE` the identity stays ours; for the other states the AI looks
 independently) → one structured report is saved and shown. The customer sees a single unified AGRO AI result; the internal
-ML/AI details stay in the database/API for debugging and are shown only to administrators.
+ML/AI details are stored for debugging, and are returned by the API and shown in the UI **only to administrators**
+(`schemas/analysis.py: present()` removes provider output, disagreement notes and provider/model names from customer responses).
 
 ## 2. Local development
 
@@ -88,11 +89,11 @@ Latest verified run (groups: auth/OTP, Google OAuth, ML plumbing, AI workflow/Ge
 
 | Suite | Result |
 |---|---|
-| Backend (pytest) | **343 passed** |
-| Frontend unit tests (vitest) | **4 passed** |
+| Backend (pytest) | **376 passed** |
+| Frontend unit tests (vitest) | **10 passed** |
 | Frontend production build | **passes** |
 
-Tests never call Gemini (the AI is mocked). Most tests use a tiny labelled fixture model (`tests/ml_fixture.py`); `tests/test_real_model.py` (22 tests) checks the installed real model, its exact thresholds, `/ml/info` and the four-case workflow.
+Tests never call Gemini (the AI is mocked; `tests/test_gemini_image_payload.py` checks that the real adapter sends the actual image bytes, MIME type and prompt in every ML case). Most tests use a tiny labelled fixture model (`tests/ml_fixture.py`); `tests/test_real_model.py` (22 tests) checks the installed real model, its exact thresholds, `/ml/info` and the four-case workflow.
 
 ## 5. Database migrations
 

@@ -1,14 +1,46 @@
 import { useEffect, useState } from 'react'
-import { Activity, Bot, CheckCircle2, Image as ImageIcon, KeyRound, ScrollText, Search, SlidersHorizontal, UserCheck, Users, XCircle } from 'lucide-react'
+import { Activity, Bot, Cpu, Database, CheckCircle2, Image as ImageIcon, KeyRound, ScrollText, Search, SlidersHorizontal, UserCheck, Users, XCircle } from 'lucide-react'
 import { PageHead } from '../../components/AnalysisBits'
 import { Alert, Button, EmptyState, ErrorState, Field, Modal, Pagination, Skeleton, Switch } from '../../components/ui'
 import { CountUp } from '../../components/Reveal'
+import { Columns, Donut } from '../../components/charts'
+import { OUTCOME } from '../../lib/outcome'
 import { useAuth } from '../../context/AuthContext'
 import { useConfig } from '../../context/ConfigContext'
 import { useToast } from '../../context/ToastContext'
 import { api, ApiError, errorMessage } from '../../lib/api'
 import { fmtDate, fmtDateTime, initials } from '../../lib/format'
 import { useAsync } from '../../lib/useAsync'
+
+
+const OUTCOME_COLORS = { healthy: '#16a34a', disease: '#f59e0b', unresolved: '#94a3b8', no_plant: '#a78bfa' }
+const AI_BADGE = { ready: ['ok', 'Ready'], not_configured: ['warn', 'Not configured'], disabled: ['gray', 'Disabled'], unknown_provider: ['err', 'Unknown provider'] }
+
+function SystemStatus() {
+  const health = useAsync(() => api.get('/health'))
+  const ml = useAsync(() => api.get('/ml/info'))
+  const ai = useAsync(() => api.get('/admin/ai'))
+  const [aiTone, aiLabel] = AI_BADGE[ai.data?.state] || ['gray', ai.loading ? '…' : 'Unknown']
+  const items = [
+    { icon: Database, name: 'Backend & database', tone: health.data?.database === 'ok' ? 'ok' : health.error ? 'err' : 'gray', label: health.data ? (health.data.database === 'ok' ? 'Healthy' : 'Database issue') : health.error ? 'Unreachable' : '…',
+      note: health.data ? `${health.data.environment} environment` : '' },
+    { icon: Cpu, name: 'AGRO AI ML model', tone: ml.data?.available ? 'ok' : ml.error ? 'err' : 'gray', label: ml.data ? (ml.data.available ? 'Installed / Ready' : 'Not installed') : ml.error ? 'Unreachable' : '…',
+      note: ml.data?.available ? `${ml.data.model.split(' (')[0]} · version ${ml.data.version} · ${ml.data.supported_crops.length} crops` : '' },
+    { icon: Bot, name: 'AI provider', tone: aiTone, label: aiLabel,
+      note: ai.data ? `${ai.data.active_provider} · key ${ai.data.providers?.find((p) => p.id === ai.data.active_provider || p.name === ai.data.active_provider)?.configured ? 'configured (hidden)' : 'not set'} · ${Object.entries(ai.data.usage_24h || {}).map(([k, v]) => `${v} ${k}`).join(', ') || 'no calls in 24h'}` : '' },
+  ]
+  return (
+    <div className="grid grid-3" style={{ marginBottom: 18 }} data-testid="system-status">
+      {items.map(({ icon: I, name, tone, label, note }) => (
+        <div key={name} className="card card-pad">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}><span className="stat-icon" style={{ margin: 0 }}><I size={18} /></span><strong>{name}</strong></div>
+          <span className={`badge ${tone}`}>{label}</span>
+          {note && <p className="small muted" style={{ marginTop: 8 }}>{note}</p>}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function Overview() {
   const { data: s, loading, error, reload } = useAsync(() => api.get('/admin/stats'))
@@ -24,13 +56,28 @@ function Overview() {
   const series = days.map((date) => ({ date, count: counts[date] || 0 }))
   const max = Math.max(1, ...series.map((d) => d.count))
   const total = series.reduce((n, d) => n + d.count, 0)
+  const o = s?.outcomes || {}
+  const analysed = Object.values(o).reduce((n, v) => n + v, 0)
+  const analysesDay = s?.activity_14d || []
   return (
     <>
+      <SystemStatus />
       <div className="grid grid-4" style={{ marginBottom: 18 }}>
         {cards.map(({ icon: I, label, value }) => (
           <div key={label} className="card stat"><div className="stat-icon"><I size={20} /></div>
             {loading ? <Skeleton h={34} w={60} /> : <div className="stat-value"><CountUp value={value} /></div>}<div className="stat-label">{label}</div></div>
         ))}
+      </div>
+      <div className="grid-2c">
+        <div className="card chart-card">
+          <h3>Analyses, last 14 days</h3><div className="sub">All users · {s?.ai_assisted ?? 0} AI-assisted overall</div>
+          {loading ? <Skeleton h={140} /> : analysesDay.every((d) => d.count === 0) ? <div className="chart-empty">No analyses in this period.</div> : <Columns series={analysesDay} label="Analyses per day" />}
+        </div>
+        <div className="card chart-card">
+          <h3>Outcomes</h3><div className="sub">All analyses with a result</div>
+          {loading ? <Skeleton h={160} /> : analysed === 0 ? <div className="chart-empty">No results yet.</div>
+            : <Donut size={140} stroke={18} data={Object.keys(OUTCOME).map((k) => ({ key: k, label: OUTCOME[k].label, value: o[k] || 0, color: OUTCOME_COLORS[k] }))} centerValue={analysed} centerLabel="analysed" />}
+        </div>
       </div>
       <div className="card card-pad">
         <h3 style={{ marginBottom: 16 }}>Sign-ups, last 14 days</h3>

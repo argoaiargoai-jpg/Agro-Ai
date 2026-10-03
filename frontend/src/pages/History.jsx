@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { History as HistoryIcon, Search } from 'lucide-react'
 import AuthedImage from '../components/AuthedImage'
-import { PageHead, StatusBadge } from '../components/AnalysisBits'
+import { OutcomeTag, PageHead, StatusBadge } from '../components/AnalysisBits'
 import { EmptyState, ErrorState, Pagination, Skeleton } from '../components/ui'
 import { api, errorMessage } from '../lib/api'
 import { fmtDateTime } from '../lib/format'
+import { headline } from '../lib/outcome'
 import { useAsync } from '../lib/useAsync'
 
 const PAGE = 10
@@ -50,10 +51,10 @@ export default function History() {
           <>
             <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity .15s' }}>
               {data.items.map((a) => (
-                <Link key={a.id} to={`/analysis/${a.id}`} className="row-link">
+                <Link key={a.id} to={`/analysis/${a.id}`} className="hist-row">
                   <div className="thumb"><AuthedImage analysisId={a.id} alt="" style={{ width: '100%', height: '100%' }} /></div>
-                  <div className="grow"><strong>{a.crop_type || 'Unspecified crop'}</strong><span className="small muted">{fmtDateTime(a.created_at)} · {a.source}</span></div>
-                  <StatusBadge status={a.status} />
+                  <div className="grow"><strong>{headline(a)}</strong><span className="small muted">{fmtDateTime(a.created_at)} · {a.source === 'camera' ? 'Camera' : 'Upload'}{a.crop_type ? ` · ${a.crop_type}` : ''}</span></div>
+                  <div className="hist-tags"><OutcomeTag analysis={a} />{a.result && a.status !== 'completed' && <StatusBadge status={a.status} />}</div>
                 </Link>
               ))}
             </div>

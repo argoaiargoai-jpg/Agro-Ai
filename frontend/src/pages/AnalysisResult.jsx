@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Check, Clock, Eye, HelpCircle, ImageOff, ShieldCheck, Sparkles, Sprout, Trash2, TriangleAlert } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Check, Clock, Cpu, Eye, HelpCircle, ImageOff, ScanLine, ShieldCheck, Sparkles, Sprout, Trash2, TriangleAlert } from 'lucide-react'
 import AuthedImage from '../components/AuthedImage'
 import { PageHead, StatusBadge } from '../components/AnalysisBits'
 import { Alert, Button, EmptyState, ErrorState, Modal, Skeleton } from '../components/ui'
@@ -13,8 +13,8 @@ import { useAsync } from '../lib/useAsync'
 const TYPE = {
   DISEASE: { tone: 'warn', icon: AlertTriangle, title: 'Disease detected' },
   HEALTHY: { tone: 'ok', icon: Sprout, title: 'Looks healthy' },
-  UNKNOWN: { tone: 'unk', icon: HelpCircle, title: 'Unknown or unsupported' },
-  NO_PLANT: { tone: 'np', icon: ImageOff, title: 'No plant detected' },
+  UNKNOWN: { tone: 'unk', icon: HelpCircle, title: 'Couldn’t identify this plant' },
+  NO_PLANT: { tone: 'np', icon: ImageOff, title: 'NO PLANT DETECTED' },
 }
 
 /** The basic result shown when no detailed report exists (guidance off / unavailable). Same visual language, no internals. */
@@ -44,8 +44,8 @@ const RISK = { low: 'Low', moderate: 'Moderate', high: 'High', unknown: 'Unknown
 const FINAL = {
   DISEASE: { tone: 'warn', icon: AlertTriangle, kicker: 'Disease detected' },
   HEALTHY: { tone: 'ok', icon: Sprout, kicker: 'Looks healthy' },
-  UNCERTAIN: { tone: 'unk', icon: HelpCircle, kicker: 'Uncertain result' },
-  REJECTED: { tone: 'np', icon: ImageOff, kicker: 'Image not suitable' },
+  UNCERTAIN: { tone: 'unk', icon: HelpCircle, kicker: 'Needs a clearer photo' },
+  REJECTED: { tone: 'np', icon: ImageOff, kicker: 'NO PLANT DETECTED' },
 }
 
 function Section({ title, items, tone, icon: Icon }) {
@@ -58,31 +58,38 @@ function Section({ title, items, tone, icon: Icon }) {
   )
 }
 
-function Report({ f }) {
+function ReportSummary({ f }) {
   const t = FINAL[f.status] || FINAL.UNCERTAIN
   const Icon = t.icon
   const pct = f.affected_percentage
   return (
-    <div className="report" data-testid="final-report" data-status={f.status}>
-      <div className={`card card-pad res res-${t.tone}`}>
-        <div className="res-top"><span className="res-icon"><Icon size={22} /></span>
-          <div><span className="res-kicker">{t.kicker}</span><h3 className="res-title">{f.headline}</h3></div></div>
-        {(f.plant || f.crop) && <p className="muted">Plant: <strong>{f.plant || f.crop}</strong>{f.crop && f.plant && f.crop !== f.plant ? ` · Crop: ${f.crop}` : ''}</p>}
-        {f.rejection_reason && <p>{f.rejection_reason}</p>}
-        {f.status !== 'REJECTED' && (
-          <div className="rep-facts">
-            {f.status !== 'UNCERTAIN' && f.severity && f.severity !== 'unknown' && <span className={`pill sev-${f.severity}`}>Severity: {SEVERITY[f.severity]}</span>}
-            <span className="pill">{pct == null ? "Affected area: can't be estimated from this photo" : `Affected area: about ${Math.round(pct)}% (visual estimate)`}</span>
-            {f.status !== 'UNCERTAIN' && f.identification_confidence && <span className="pill">Certainty: {f.identification_confidence}</span>}
-          </div>
-        )}
-      </div>
+    <div className={`card card-pad res res-${t.tone} outcome-hero`} data-testid="final-report" data-status={f.status}>
+      <div className="res-top"><span className="res-icon"><Icon size={22} /></span>
+        <div><span className="res-kicker">{t.kicker}</span><h3 className="res-title big">{f.headline}</h3></div></div>
+      {(f.plant || f.crop) && <p className="muted">Plant: <strong>{f.plant || f.crop}</strong>{f.crop && f.plant && f.crop !== f.plant ? ` · Crop: ${f.crop}` : ''}</p>}
+      {f.rejection_reason && <p>{f.rejection_reason}</p>}
+      {(f.status === 'REJECTED' || f.status === 'UNCERTAIN') && (
+        <div className="res-cta"><Link to="/analyze" className="btn btn-primary"><ScanLine size={18} /> Upload another photo</Link></div>
+      )}
+      {f.status !== 'REJECTED' && (
+        <div className="rep-facts">
+          {f.status !== 'UNCERTAIN' && f.severity && f.severity !== 'unknown' && <span className={`pill sev-${f.severity}`}>Severity: {SEVERITY[f.severity]}</span>}
+          <span className="pill">{pct == null ? "Affected area: can't be estimated from this photo" : `Affected area: about ${Math.round(pct)}% (visual estimate)`}</span>
+          {f.status !== 'UNCERTAIN' && f.identification_confidence && <span className="pill">Certainty: {f.identification_confidence}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
 
+function ReportDetails({ f }) {
+  return (
+    <div className="report" data-testid="final-report-details">
       {f.status !== 'REJECTED' && (
         <div className="rep-grid">
           <Section title="Symptoms observed" items={f.symptoms} icon={Eye} />
-          <Section title="Immediate actions" items={f.immediate_actions} icon={Check} />
-          <Section title="Treatment options" items={f.treatment} />
+          <Section title={f.status === 'HEALTHY' ? 'Care recommendations' : 'Immediate actions'} items={f.immediate_actions} icon={Check} />
+          <Section title={f.status === 'HEALTHY' ? 'Additional care' : 'Treatment & remedies'} items={f.treatment} />
           <Section title="Prevention" items={f.prevention} icon={ShieldCheck} />
           {f.spread_risk && (f.spread_risk.level !== 'unknown' || f.spread_risk.explanation) && (
             <section className="rep-sec"><h4>Spread risk: <span className={`pill risk-${f.spread_risk.level}`}>{RISK[f.spread_risk.level]}</span></h4>
@@ -107,7 +114,7 @@ function GuidanceBanner({ a, running, onRetry }) {
   const wait = err.retry_after ? ` Try again in about ${err.retry_after >= 120 ? `${Math.round(err.retry_after / 60)} minutes` : `${err.retry_after} seconds`}.` : ''
   return (
     <div className="card card-pad res res-wait" data-testid="ai-error" data-code={err.code}>
-      <h3><AlertTriangle size={18} /> Detailed guidance isn't available right now</h3>
+      <h3><AlertTriangle size={18} /> Guidance temporarily unavailable</h3>
       <p>{err.message}{wait}</p>
       <p className="small muted">Your basic result above is still valid. {err.retryable ? 'You can try again for the detailed guidance.' : 'Trying again won’t help right now; please check back later.'}</p>
       {err.retryable && <Button size="sm" loading={running} onClick={onRetry}>Try again</Button>}
@@ -151,10 +158,12 @@ export default function AnalysisResult() {
   const ml = a?.result?.ml
   const final = a?.result?.final
   const mlOnly = a?.result?.stage === 'ml_only'
+  const failed = a?.result?.stage === 'guidance_failed'
   const steps = [
-    ['Image uploaded', !!a],
-    ['Image analysis', !!ml],
-    [mlOnly ? 'Agricultural guidance (not available)' : 'Agricultural guidance', !!final],
+    ['Image received', !!a],
+    ['AGRO AI ML model analysis', !!ml],
+    [failed ? 'Agricultural intelligence (temporarily unavailable)' : mlOnly ? 'Agricultural intelligence (not available)' : 'Agricultural intelligence', !!final || mlOnly],
+    [failed ? 'Final result (basic result shown)' : 'Final result', !!final || (!!ml && mlOnly)],
   ]
 
   async function retryGuidance() {            // no ?force: the stored ML result is kept, only the guidance step runs again
@@ -190,8 +199,14 @@ export default function AnalysisResult() {
           <div className="result-img">{loading ? <Skeleton h="100%" /> : <AuthedImage analysisId={id} alt="Analyzed crop" style={{ width: '100%', height: '100%' }} />}</div>
         </div>
         <div style={{ display: 'grid', gap: 18 }}>
+          {final && <ReportSummary f={final} />}
+          {ml && !final && <BasicResult ml={ml} />}
           <div className="card card-pad">
-            <h3 style={{ fontSize: 16, marginBottom: 16 }}>Progress</h3>
+            <div className="res-badges" style={{ marginTop: 0, marginBottom: 14 }}>
+              <span className="mlbadge"><Cpu size={14} /> AGRO AI ML MODEL</span>
+              {final && <span className="mlbadge"><Sparkles size={14} /> AGRO AI Intelligence</span>}
+            </div>
+            <h3 style={{ fontSize: 16, marginBottom: 16 }}>Analysis progress</h3>
             <div className="timeline">
               {steps.map(([label, done]) => (
                 <div key={label} className={`tl-item${done ? ' done' : ''}`}>
@@ -216,7 +231,6 @@ export default function AnalysisResult() {
               <Button size="sm" loading={running} onClick={runAnalysis}>Analyze now</Button>
             </div>
           )}
-          {ml && !final && <BasicResult ml={ml} />}
           {a && <GuidanceBanner a={a} running={running} onRetry={retryGuidance} />}
 
           <div className="card card-pad">
@@ -233,7 +247,7 @@ export default function AnalysisResult() {
         </div>
       </div>
 
-      {final && <Report f={final} />}
+      {final && <ReportDetails f={final} />}
 
       {isAdmin && a && <AdminInternals a={a} />}
 

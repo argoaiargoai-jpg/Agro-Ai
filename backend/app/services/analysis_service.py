@@ -162,7 +162,59 @@ def image_file(a: Analysis) -> Path:
     return path
 
 
+OUTCOME_OF_ML = {"DISEASE": "disease", "HEALTHY": "healthy", "UNKNOWN": "unresolved", "NO_PLANT": "no_plant"}
+OUTCOME_OF_FINAL = {"DISEASE": "disease", "HEALTHY": "healthy", "UNCERTAIN": "unresolved", "REJECTED": "no_plant"}
+SUMMARY_WINDOW = 1000          # newest analyses considered for the distribution charts (bounded work per request)
+
+
+def outcome_of(result: dict | None) -> str | None:
+    """Customer-level outcome of an analysis: healthy | disease | unresolved | no_plant (None until a result exists)."""
+    if not result:
+        return None
+    final, ml = result.get("final"), result.get("ml")
+    if final and final.get("status") in OUTCOME_OF_FINAL:
+        return OUTCOME_OF_FINAL[final["status"]]
+    if ml and ml.get("classification_type") in OUTCOME_OF_ML:
+        return OUTCOME_OF_ML[ml["classification_type"]]
+    return None
+
+
+def _top(counter: dict, n: int = 6) -> list[dict]:
+    return [{"name": k, "count": v} for k, v in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:n]]
+
+
+def aggregate(window) -> dict:
+    """Distribution numbers from (created_at, result, ai_status, crop_type) rows. Real data only: nothing is padded or estimated."""
+    outcomes = {"healthy": 0, "disease": 0, "unresolved": 0, "no_plant": 0}
+    diseases: dict[str, int] = {}
+    crops: dict[str, int] = {}
+    ai_assisted = 0
+    day_counts: dict[str, int] = {}
+    for created, result, ai_status, crop_type in window:
+        if created:
+            day = created.date().isoformat()
+            day_counts[day] = day_counts.get(day, 0) + 1
+        out = outcome_of(result)
+        if out is None:
+            continue
+        outcomes[out] += 1
+        if ai_status == "completed":
+            ai_assisted += 1
+        final, ml = (result or {}).get("final") or {}, (result or {}).get("ml") or {}
+        crop = final.get("crop") or final.get("plant") or ml.get("crop") or crop_type
+        if crop and out in ("healthy", "disease"):
+            crops[crop] = crops.get(crop, 0) + 1
+        disease = final.get("disease") or ml.get("disease")
+        if out == "disease" and disease:
+            diseases[disease] = diseases.get(disease, 0) + 1
+    today = utcnow().date()
+    activity = [{"date": (today - timedelta(days=13 - i)).isoformat(), "count": day_counts.get((today - timedelta(days=13 - i)).isoformat(), 0)}
+                for i in range(14)]
+    return {"outcomes": outcomes, "ai_assisted": ai_assisted, "top_diseases": _top(diseases), "crops": _top(crops), "activity_14d": activity}
+
+
 def summary_for_user(db: Session, user: User) -> dict:
+    """Real numbers only, derived from this user's stored analyses (nothing is estimated or padded)."""
     rows = db.execute(
         select(Analysis.status, func.count()).where(Analysis.user_id == user.id).group_by(Analysis.status)
     ).all()
@@ -170,7 +222,13 @@ def summary_for_user(db: Session, user: User) -> dict:
     recent = db.scalars(
         select(Analysis).where(Analysis.user_id == user.id).order_by(Analysis.created_at.desc()).limit(5)
     ).all()
-    return {"total": sum(by_status.values()), "by_status": by_status, "recent": recent}
+
+    window = db.execute(
+        select(Analysis.created_at, Analysis.result, Analysis.ai_status, Analysis.crop_type)
+        .where(Analysis.user_id == user.id).order_by(Analysis.created_at.desc()).limit(SUMMARY_WINDOW)
+    ).all()
+    agg = aggregate(window)
+    return {"total": sum(by_status.values()), "by_status": by_status, "recent": recent, **agg}
 
 
 # ----------------------------------------------------------------------------------------------------------------------

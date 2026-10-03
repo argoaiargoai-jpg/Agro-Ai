@@ -180,7 +180,7 @@ def test_analyze_end_to_end(client, user_auth, model):
     assert body["status"] == "completed" and body["confidence"] == ml["confidence"]
     assert ml["classification_type"] == "DISEASE" and ml["crop"] == "Tomato" and ml["disease"] == "Early Blight"
     # Phase 3 contract: with no AI provider configured the ML result is final and NO guidance is fabricated
-    assert body["result"]["ai"] is None and body["result"]["final"] is None and body["result"]["stage"] == "ml_only"
+    assert body["result"].get("ai") is None and body["result"]["final"] is None and body["result"]["stage"] == "ml_only"
     assert body["ai_status"] == "not_configured"
     lst = client.get(f"{V}/analyses?status=completed", headers=user_auth).json()
     assert lst["total"] == 1

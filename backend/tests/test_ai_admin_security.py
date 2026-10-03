@@ -136,7 +136,7 @@ def _analyze(client, headers, color):
     return aid, client.post(f"{V}/analyses/{aid}/analyze", headers=headers)
 
 
-def test_full_stack_with_real_gemini_adapter_success(client, user_auth, real_gemini_stack):
+def test_full_stack_with_real_gemini_adapter_success(client, admin_auth, real_gemini_stack):
     seen = {}
 
     def handler(req):
@@ -144,7 +144,7 @@ def test_full_stack_with_real_gemini_adapter_success(client, user_auth, real_gem
         ans = payload(health_status="diseased", disease="Early Blight", symptoms=["Concentric rings"], severity="mild", ml_consistency="consistent")
         return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": json.dumps(ans)}]}, "finishReason": "STOP"}]})
     _use_mock_gemini(handler)
-    aid, r = _analyze(client, user_auth, (255, 0, 0))
+    aid, r = _analyze(client, admin_auth, (255, 0, 0))
     b = r.json()
     assert b["status"] == "completed" and b["ai_provider"] == "gemini" and b["result"]["final"]["disease_source"] == "ml"
     assert seen["key"] == KEY and KEY not in seen["url"] and "inlineData" in json.dumps(seen["body"]) and KEY not in r.text

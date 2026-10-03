@@ -80,13 +80,13 @@ def build_report(ml: dict, ai: AIAnalysis) -> AnalysisReport:
 
     if not ai.plant_present:
         if state == "NO_PLANT":
-            return AnalysisReport(status="REJECTED", headline="This image isn't suitable for plant analysis", disagreement=None,
+            return AnalysisReport(status="REJECTED", headline="No plant detected", disagreement=None,
                                   rejection_reason="We couldn't find a plant, crop or leaf in this image. "
                                                    "Please upload a clear, well-lit photo of a leaf or plant.", **base)
         dis = Disagreement(ml_said=ml_text, ai_said="No plant material visible",
                            message="The AI reviewer found no plant material in this image, which does not match the first-stage result.")
         if state == "UNKNOWN":
-            return AnalysisReport(status="REJECTED", headline="This image isn't suitable for plant analysis", disagreement=dis,
+            return AnalysisReport(status="REJECTED", headline="No plant detected", disagreement=dis,
                                   rejection_reason="We couldn't find plant material in this image. Please upload a clear photo of a leaf or plant.", **base)
         return AnalysisReport(status="UNCERTAIN", headline="We couldn't reach a reliable conclusion", disagreement=dis, **base)   # ML said healthy
 
