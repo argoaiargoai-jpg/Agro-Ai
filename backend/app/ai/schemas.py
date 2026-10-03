@@ -102,7 +102,7 @@ class AnalysisReport(BaseModel):
     plant: str | None = None
     crop: str | None = None
     disease: str | None = None
-    disease_source: Literal["ml", "ai"] | None = None
+    disease_source: Literal["ml", "ai", "specialist"] | None = None
     symptoms: list[str] = []
     severity: Literal["none", "mild", "moderate", "severe", "unknown"] | None = None
     affected_percentage: float | None = None

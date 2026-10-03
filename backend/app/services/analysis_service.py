@@ -17,7 +17,7 @@ from app.models import Analysis, AnalysisStatus, User
 from app.ai import registry
 from app.ai.base import ProviderError
 from app.core.security import utcnow
-from app.services import analysis_workflow, ml_service, settings_service
+from app.services import analysis_workflow, ml_service, routing, settings_service
 
 CHUNK = 1024 * 256
 log = logging.getLogger("agroai.analysis")
@@ -264,14 +264,17 @@ def _claim(db: Session, a: Analysis) -> None:
 
 
 def _result(ml, ai=None, final=None, ai_error=None, stage="ml_done", case=None, plan=None, info=None) -> dict:
-    """`plan` = customer-safe step names that will run or did run (always ["guidance"] after our model). `info` is kept for compatibility."""
+    """`plan` = customer-safe step names that will run or did run. `info` (internal, admin-only): route and specialist diagnostics."""
     out = {"ml": ml, "ai": ai, "final": final, "ai_error": ai_error, "stage": stage, "plan": plan or ["guidance"],
            "prompt_version": analysis_workflow.prompts.PROMPT_VERSION, "ai_case": case}
+    if info:
+        out["route"], out["specialists"] = info.get("route"), info.get("specialists")
     return out
 
 
 def _planned(ml: dict) -> list[str]:
-    return ["guidance"]                      # every analysis: our model, then the AI's independent look at the original image
+    s = get_settings()
+    return routing.planned_steps(routing.decide(ml, s), s)
 
 
 def _ml_only(db: Session, a: Analysis, ml: dict, ai_status: str) -> Analysis:
@@ -309,7 +312,7 @@ def _ai_stage(db: Session, user: User, a: Analysis, ml: dict, image: bytes, forc
     except KeyError:
         return _guidance_failed(db, a, ml, "misconfigured", "Detailed guidance is temporarily unavailable.", False, None, "unknown_provider")
     a.ai_provider, a.ai_model = provider.name, provider.model
-    if not provider.is_configured():
+    if not provider.is_configured() and not routing.any_specialist_configured(settings):
         return _ml_only(db, a, ml, "not_configured")
     now = utcnow()
     cooldown = AI_FORCE_COOLDOWN if forced else AI_RETRY_COOLDOWN
@@ -325,13 +328,24 @@ def _ai_stage(db: Session, user: User, a: Analysis, ml: dict, image: bytes, forc
     db.commit()
 
     def on_stage(name: str) -> None:                                             # committed so the UI follows the REAL backend step
-        a.result = {**(a.result or {}), "stage": name}
+        cur = a.result or {}
+        plan = list(cur.get("plan") or [])
+        if name not in plan:                                                     # a fallback step that was not announced: insert it before guidance
+            plan.insert(plan.index("guidance") if "guidance" in plan else len(plan), name)
+        a.result = {**cur, "stage": name, "plan": plan}
         db.commit()
     try:
         ai, report, case, info = analysis_workflow.run_guidance(provider, ml, image, settings, on_stage)
     except ProviderError as exc:
         log.warning("analysis %s: AI guidance failed (%s): %s", a.id, exc.ai_status, exc.detail)
         return _guidance_failed(db, a, ml, exc.ai_status, exc.user_message, exc.retryable, exc.retry_after, type(exc).__name__)
+    if ai is None:                       # Gemini was unavailable but a specialist produced a result: that IS the final result (the analysis does not fail)
+        log.warning("analysis %s: completed from the specialist result because AI guidance failed (%s)", a.id, info.get("gemini_error"))
+        a.result = _result(ml, final=report.model_dump(), stage="specialist_only", case=case, plan=info["plan_done"], info=info,
+                           ai_error={"code": info["gemini_error"], "message": "Detailed guidance isn't available for this analysis.", "retryable": False})
+        a.status, a.ai_status, a.ai_error_code = AnalysisStatus.completed.value, info["gemini_error"], info["gemini_error_class"]
+        db.commit()
+        return a
     a.result = _result(ml, ai=ai.model_dump(), final=report.model_dump(), stage="complete", case=case, plan=info["plan_done"], info=info)
     a.status, a.ai_status, a.ai_error_code, a.ai_completed_at = AnalysisStatus.completed.value, "completed", None, utcnow()
     db.commit()

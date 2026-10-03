@@ -14,9 +14,10 @@ import threading
 from pydantic import ValidationError
 
 from app.ai import imaging, prompts, safety
-from app.ai.base import AIProvider, ProviderBadResponse, ProviderRateLimited
+from app.ai.base import AIProvider, ProviderBadResponse, ProviderError, ProviderNotConfigured, ProviderRateLimited
 from app.ai.schemas import AIAnalysis, AnalysisReport, Disagreement
 from app.core.config import Settings
+from app.services import routing
 
 log = logging.getLogger("agroai.workflow")
 
@@ -106,23 +107,61 @@ def build_report(ml: dict, ai: AIAnalysis) -> AnalysisReport:
                           disagreement=_internal_disagreement(ml, ai, "UNCERTAIN", crop or plant, None), **base)
 
 
-def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Settings, on_stage=None) -> tuple[AIAnalysis, AnalysisReport, str, dict]:
-    """ORIGINAL image + our model's result (as a hint) -> the AI provider -> validated assessment -> final report.
-    Called for every analysis, whatever our model's confidence. Returns (ai, report, case, info). Raises ProviderError subclasses; never fabricates.
-    `on_stage("guidance")` is called when the provider request starts."""
+SPECIALIST_MIN_PROBABILITY = 0.5          # a specialist disease/health verdict below this is not shown as a finding
+
+
+def specialist_report(ml: dict, ev: routing.Evidence) -> AnalysisReport | None:
+    """The final result when Gemini is unavailable: the LATEST successful specialist result, in the same customer-facing shape
+    (no guidance sections: they come from Gemini). None when no specialist produced anything."""
+    latest = ev.latest
+    if not latest:
+        return None
+    plants, diseases, healthy = latest["plants"], latest["diseases"], latest["healthy_probability"]
+    plant = plants[0].name if plants else None
+    base = dict(ml_state=ml["classification_type"], disclaimer=DISCLAIMER, plant=plant, crop=plant, disease_source="specialist",
+                ai_notes="Detailed guidance couldn't be generated for this analysis, so this result is based on the automated analysis only.")
+    top = diseases[0] if diseases else None
+    if latest["kind"] == "disease" and top and top.probability >= SPECIALIST_MIN_PROBABILITY and top.probability >= (healthy or 0.0):
+        return AnalysisReport(status="DISEASE", headline=f"{plant or 'Plant'} — {top.name}", disease=top.name, **base)
+    if latest["kind"] == "disease" and healthy is not None and healthy >= SPECIALIST_MIN_PROBABILITY:
+        return AnalysisReport(status="HEALTHY", headline=f"{plant or 'Plant'} looks healthy", **{**base, "disease_source": None})
+    return AnalysisReport(status="UNCERTAIN", headline="We couldn't reach a reliable conclusion", **{**base, "disease_source": None})
+
+
+def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Settings, on_stage=None) -> tuple[AIAnalysis | None, AnalysisReport, str, dict]:
+    """Our model's confidence picks the specialist path (routing.py); then Gemini ALWAYS gets the ORIGINAL image, our model's result as a hint and
+    whatever evidence the specialists produced. If Gemini fails, the latest successful specialist result is returned as the final result
+    (ai is None then); with no specialist result the ProviderError propagates (existing behaviour: preliminary result + retry).
+    Returns (ai, report, case, info); info is internal bookkeeping. `on_stage(name)` is called as each real step starts."""
     jpeg, mime = imaging.prepare_for_provider(image, settings.ai_max_image_side, settings.ml_max_pixels)
-    request, case = prompts.build_request(ml, jpeg, mime)
+    route = routing.decide(ml, settings)
+    evidence = routing.gather(route, jpeg, mime, settings, on_stage)         # the same re-encoded image bytes go to every visual provider
+    request, case = prompts.build_request(ml, jpeg, mime, evidence.internal())
+    info = {"route": route, "plan_done": list(evidence.steps_done), "specialists": evidence.internal()}
     if on_stage:
         on_stage("guidance")
-    gate = _provider_gate(settings)
-    if not gate.acquire(timeout=10):
-        raise ProviderRateLimited("local provider concurrency limit reached", retry_after=10)
     try:
-        response = provider.analyze(request)
-    finally:
-        gate.release()
-    try:
-        ai = AIAnalysis.model_validate(response.data)
-    except ValidationError as exc:
-        raise ProviderBadResponse("answer did not match the schema: " + "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in exc.errors()[:4])) from exc
-    return ai, build_report(ml, ai), case, {"plan_done": ["guidance"]}
+        if not provider.is_configured():
+            raise ProviderNotConfigured("no key configured for the AI provider")
+        gate = _provider_gate(settings)
+        if not gate.acquire(timeout=10):
+            raise ProviderRateLimited("local provider concurrency limit reached", retry_after=10)
+        try:
+            response = provider.analyze(request)
+        finally:
+            gate.release()
+        try:
+            ai = AIAnalysis.model_validate(response.data)
+        except ValidationError as exc:
+            raise ProviderBadResponse("answer did not match the schema: " + "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in exc.errors()[:4])) from exc
+    except ProviderError as exc:
+        evidence.providers.append({"provider": provider.name, "step": "guidance", "status": exc.ai_status})
+        info["specialists"] = evidence.internal()
+        report = specialist_report(ml, evidence)
+        if report is None:
+            raise
+        log.warning("AI guidance unavailable (%s); returning the %s result instead", exc.ai_status, evidence.latest["provider"])
+        return None, report, "SPECIALIST_ONLY", {**info, "gemini_error": exc.ai_status, "gemini_error_class": type(exc).__name__}
+    evidence.providers.append({"provider": provider.name, "step": "guidance", "status": "ok"})
+    info.update(plan_done=evidence.steps_done + ["guidance"], specialists=evidence.internal())
+    return ai, build_report(ml, ai), case, info

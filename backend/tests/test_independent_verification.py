@@ -1,5 +1,4 @@
 """Every analysis: our model first, then the AI ALWAYS inspects the original image itself. Confidence never decides whether it is asked."""
-import importlib
 import io
 import re
 from datetime import timedelta
@@ -9,7 +8,6 @@ from PIL import Image
 
 from app.ai import registry
 from app.ai.base import ProviderUnavailable
-from app.ai.specialists import registry as specialists
 from app.core.config import Settings
 from app.services import analysis_service, analysis_workflow, ml_service
 from tests import ml_fixture
@@ -43,7 +41,7 @@ def test_gemini_is_always_called_with_the_original_image_whatever_the_model_conf
     assert req.image and req.image[:2] == b"\xff\xd8" and req.image_mime == "image/jpeg"      # the image bytes, not just the prediction text
     assert "Corn with Northern Leaf Blight" in req.prompt and f"{conf:.2f}" in req.prompt      # our result is supporting context
     assert "Do NOT accept it blindly" in req.prompt
-    assert info == {"plan_done": ["guidance"]} and report.status == "DISEASE"
+    assert info["plan_done"] == ["guidance"] and report.status == "DISEASE"          # no specialist key configured here: straight to Gemini
 
 
 @pytest.mark.parametrize("kind,conf", [("HEALTHY", 0.99), ("HEALTHY", 0.6), ("UNKNOWN", 0.99), ("UNKNOWN", 0.2), ("NO_PLANT", 0.99), ("NO_PLANT", 0.4)])
@@ -121,25 +119,11 @@ def test_through_the_api_every_state_reaches_gemini_with_the_uploaded_image(clie
         assert r.json()["result"]["ml"]["classification_type"] == state and len(api.requests) == before + 1 and api.requests[-1].image
 
 
-# ------------------------------------------------------------------------------------ the old routing is really gone
-def test_confidence_routing_and_specialist_calls_are_no_longer_part_of_the_analysis(client, user_auth, api):
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("app.services.routing")
-    assert not [f for f in Settings.model_fields if f.startswith("route_")]
-    called = []
-
-    class Boom:
-        name = "boom"
-        def is_configured(self): return True
-        def identify(self, *a): called.append("identify"); raise AssertionError("must not be called")
-        def diagnose(self, *a): called.append("diagnose"); raise AssertionError("must not be called")
-    specialists.register_identifier("boom", lambda s: Boom()); specialists.register_diagnoser("boom", lambda s: Boom())
-    try:
-        api.respond(payload(health_status="uncertain"))
-        _, r = analyze(client, user_auth, GRAY)                                   # UNKNOWN used to trigger plant identification + disease specialists
-        assert r.status_code == 200 and called == [] and r.json()["result"]["plan"] == ["guidance"]
-    finally:
-        specialists.unregister("boom")
+# ------------------------------------------------------------------------------------ specialists are optional: unconfigured = straight to Gemini
+def test_without_any_specialist_key_the_analysis_goes_straight_to_gemini(client, user_auth, api):
+    api.respond(payload(health_status="uncertain"))
+    _, r = analyze(client, user_auth, GRAY)
+    assert r.status_code == 200 and r.json()["result"]["plan"] == ["guidance"] and api.requests and api.requests[-1].image
 
 
 # ------------------------------------------------------------------------------------ G: customers never see the comparison

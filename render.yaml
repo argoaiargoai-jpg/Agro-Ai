@@ -59,7 +59,7 @@ services:
         sync: false
       - key: GEMINI_API_KEY_2
         sync: false
-      - key: PLANTNET_API_KEY          # specialist providers: currently NOT used by the analysis flow (kept for later)
+      - key: PLANTNET_API_KEY          # specialist providers (optional; skipped when unset): plant identification
         sync: false
       - key: PLANTIX_API_KEY           # crop disease analysis
         sync: false

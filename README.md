@@ -71,7 +71,7 @@ A test (`test_every_setting_is_documented_in_env_example`) fails if a setting is
 | Google sign-in | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
 | Admin bootstrap | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` |
 | AI guidance | `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2` (legacy `GEMINI_API_KEY` = key 1), `GEMINI_MODEL`, `GEMINI_BASE_URL`, `AI_TIMEOUT_SECONDS`, `AI_MAX_RETRIES`, `AI_MAX_CONCURRENCY`, `AI_MAX_IMAGE_SIDE`, `AI_USER_HOURLY_LIMIT` |
-| Specialist providers (currently unused by the analysis flow) | `PLANTNET_API_KEY`, `PLANTIX_API_KEY`, `KINDWISE_API_KEY`, `KINDWISE_PLANT_API_KEY`, `*_BASE_URL`, `SPECIALIST_TIMEOUT_SECONDS` |
+| Specialist providers (optional) | `PLANTNET_API_KEY`, `KINDWISE_API_KEY`, `KINDWISE_PLANT_API_KEY`, `PLANTIX_API_KEY` (not used by the flow), `*_BASE_URL`, `SPECIALIST_TIMEOUT_SECONDS`, `ROUTE_CONFIDENCE_THRESHOLD` |
 | ML | `ML_MODEL_DIR`, `ML_THREADS`, `ML_MAX_CONCURRENCY`, `ML_MAX_PIXELS` |
 | Uploads | `UPLOAD_DIR`, `MAX_UPLOAD_MB` |
 | Frontend (build time) | `VITE_API_URL` — **the only variable the browser ever sees; never put a secret in a `VITE_` variable** (the build refuses to run if you do) |
@@ -90,7 +90,7 @@ Latest verified run (groups: auth/OTP, Google OAuth, ML plumbing, AI workflow/Ge
 
 | Suite | Result |
 |---|---|
-| Backend (pytest) | **474 passed** |
+| Backend (pytest) | **511 passed** |
 | Frontend unit tests (vitest) | **33 passed** |
 | Frontend production build | **passes** |
 
@@ -107,14 +107,13 @@ alembic check                 # confirms migrations match the models
 `0002_ai_guidance_columns` only adds **nullable** columns to `analyses`, so pre-existing analyses keep working. Upgrade → downgrade → upgrade
 with data present is covered by `tests/test_migrations.py`. Production (`render.yaml`) runs `alembic upgrade head` on every start.
 
-## 5b. Analysis flow (our model first, then the AI always checks the original image)
+## 5b. Analysis flow (our model, then specialists by confidence, then Gemini)
 
-1. Our MobileNetV3-Small model runs first on every upload (unchanged).
-2. **Whatever its confidence (even 98%+), the ORIGINAL image is then always sent to Gemini** for an independent visual assessment. Our model's result goes along only as a hint that the prompt tells Gemini not to accept blindly.
-3. **Gemini's assessment is what the customer sees**: plant present or not, plant/crop, healthy or diseased, disease, symptoms, severity, actions, treatment, prevention, spread risk, warnings, monitoring. If it disagrees with our model, it wins; if it cannot identify the plant or condition (or only with low certainty) the result is an honest "no reliable conclusion", never our prediction presented as confirmed.
-4. Any difference between the two is stored internally (`final.disagreement`) for administrators only. Customers never receive it, and the UI shows no model or provider names.
-
-There is no confidence-based routing, voting, averaging or fusion. If Gemini fails, the analysis is kept as `partial` with our model's result shown as a clearly labelled preliminary result and a Retry button (retry reuses the stored model result). The Pl@ntNet / Plantix / Kindwise adapters (`app/ai/specialists/`) and their keys are still in the code but are **not used** by the analysis flow.
+1. Our MobileNetV3-Small model runs first on every upload (unchanged). Its confidence is used only to choose the specialist path (`ROUTE_CONFIDENCE_THRESHOLD`, 0.80).
+2. **Confidence <= 0.80:** Kindwise; if Kindwise is unavailable, Pl@ntNet. **Confidence > 0.80:** Pl@ntNet, then Kindwise (a failing one is skipped, the other still runs). If neither is available, straight to Gemini. "Unavailable" = quota/429, 5xx, timeout, connection failure or no key; credential/format errors are logged as configuration problems and skipped the same way.
+3. **Gemini always runs next** with the ORIGINAL image, our model's result as a hint and the specialist evidence as reference hints. When it answers, its visual assessment is what the customer sees (it wins any disagreement).
+4. **If Gemini is unavailable** (both keys failed, timeout, quota, no key): the analysis still completes with the latest successful specialist result (e.g. Kindwise's disease verdict, or Pl@ntNet's plant name with no condition claimed). With no specialist result at all, the existing behaviour applies: a clearly labelled preliminary result plus a Retry button.
+5. Customers never see providers, routing, confidence or fallback details. Administrators get them in `result.route` / `result.specialists` (providers tried, status of each, which result was used).
 
 **Two Gemini keys.** `GEMINI_API_KEY_1` / `_2` alternate request by request (1, 2, 1, 2...). The sequence is an atomic counter row in PostgreSQL (`counters`, one `INSERT .. ON CONFLICT DO UPDATE .. RETURNING`; migration `0003`), so it survives restarts and concurrent requests. If the chosen key fails (429, 5xx, timeout, bad key...) the same request is retried once on the other key without touching the counter (2 attempts at most). One key alone works; none keeps the ML-only behaviour.
 

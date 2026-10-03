@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     kindwise_plant_api_key: SecretStr = SecretStr("")   # plant.health (non-crop plants); separate Kindwise product, optional
     kindwise_plant_base_url: str = "https://plant.id"
     specialist_timeout_seconds: float = 20.0
+    route_confidence_threshold: float = 0.80            # our model's confidence: <= this starts with Kindwise, > this starts with Pl@ntNet (see services/routing.py)
 
     ml_model_dir: str = ""              # default: app/ml (model + metadata shipped with the app)
     ml_threads: int = 1                 # ONNX Runtime CPU threads (keep low on small free-tier machines)

@@ -30,3 +30,16 @@ def identifiers(settings: Settings) -> list[PlantIdentifier]:
 
 def diagnosers(settings: Settings) -> list[DiseaseDiagnoser]:
     return [p for p in (f(settings) for f in _DIAGNOSERS.values()) if p.is_configured()]
+
+
+def get_identifier(name: str, settings: Settings) -> PlantIdentifier | None:
+    """The named identifier if it is registered AND configured (has its key), else None."""
+    f = _IDENTIFIERS.get(name)
+    p = f(settings) if f else None
+    return p if p is not None and p.is_configured() else None
+
+
+def get_diagnoser(name: str, settings: Settings) -> DiseaseDiagnoser | None:
+    f = _DIAGNOSERS.get(name)
+    p = f(settings) if f else None
+    return p if p is not None and p.is_configured() else None
