@@ -8,7 +8,7 @@ import { initials } from '../lib/format'
 
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/analyze', label: 'Analyze crop', icon: ScanLine },
+  { to: '/analyze', label: 'Analyze plant', icon: ScanLine },
   { to: '/history', label: 'History', icon: History },
   { to: '/profile', label: 'Profile', icon: UserRound },
   { to: '/settings', label: 'Settings', icon: Settings },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeAnalysis, headline, stepState } from './outcome'
+import { buildSteps, describeAnalysis, headline, stepStates } from './outcome'
 
 const ml = (t, extra = {}) => ({ result: { ml: { classification_type: t, ...extra } } })
 
@@ -34,11 +34,33 @@ describe('headline', () => {
   })
 })
 
-describe('stepState', () => {
-  it('follows the real backend stage', () => {
-    expect([0, 1, 2, 3].map((i) => stepState('uploading', i))).toEqual(['now', 'todo', 'todo', 'todo'])
-    expect([0, 1, 2, 3].map((i) => stepState('ml', i))).toEqual(['done', 'now', 'todo', 'todo'])
-    expect([0, 1, 2, 3].map((i) => stepState('guidance', i))).toEqual(['done', 'done', 'now', 'todo'])
-    expect([0, 1, 2, 3].map((i) => stepState('done', i))).toEqual(['done', 'done', 'done', 'done'])
+describe('analysis steps follow the real backend plan', () => {
+  const keys = (plan) => buildSteps(plan).map((s) => s.key)
+  it('shows only the steps the backend will run, never provider names', () => {
+    expect(keys(['guidance'])).toEqual(['received', 'ml', 'guidance', 'final'])
+    expect(keys(['disease', 'guidance'])).toEqual(['received', 'ml', 'disease', 'guidance', 'final'])
+    expect(keys(['identify', 'disease', 'guidance'])).toEqual(['received', 'ml', 'identify', 'disease', 'guidance', 'final'])
+    expect(keys(undefined)).toEqual(['received', 'ml', 'guidance', 'final'])
+    expect(keys([])).toEqual(['received', 'ml', 'final'])                                                // guidance switched off: nothing is promised
+    expect(keys(['plantix', 'guidance'])).toEqual(['received', 'ml', 'guidance', 'final'])            // unknown names are ignored
+    const text = buildSteps(['identify', 'disease', 'guidance']).map((s) => `${s.label} ${s.hint || ''}`).join(' ')
+    expect(text).not.toMatch(/plantix|kindwise|plant\.?net|gemini|mobilenet|api/i)
+  })
+  it('marks pending / active / completed along the real stage', () => {
+    const steps = buildSteps(['identify', 'disease', 'guidance'])
+    expect(stepStates(steps, 'uploading')).toEqual(['now', 'todo', 'todo', 'todo', 'todo', 'todo'])
+    expect(stepStates(steps, 'ml')).toEqual(['done', 'now', 'todo', 'todo', 'todo', 'todo'])
+    expect(stepStates(steps, 'ml_done')).toEqual(['done', 'done', 'now', 'todo', 'todo', 'todo'])
+    expect(stepStates(steps, 'disease')).toEqual(['done', 'done', 'done', 'now', 'todo', 'todo'])
+    expect(stepStates(steps, 'guidance')).toEqual(['done', 'done', 'done', 'done', 'now', 'todo'])
+    expect(stepStates(steps, 'done')).toEqual(Array(6).fill('done'))
+  })
+  it('the first plan step becomes active when the model finishes, whatever it is', () => {
+    expect(stepStates(buildSteps(['guidance']), 'ml_done')).toEqual(['done', 'done', 'now', 'todo'])
+    expect(stepStates(buildSteps(['disease', 'guidance']), 'ml_done')).toEqual(['done', 'done', 'now', 'todo', 'todo'])
+  })
+  it('shows failure at the failing step with earlier steps completed', () => {
+    expect(stepStates(buildSteps(['identify', 'disease', 'guidance']), 'guidance', 'guidance')).toEqual(['done', 'done', 'done', 'done', 'failed', 'todo'])
+    expect(stepStates(buildSteps(['guidance']), 'ml', 'guidance')).toEqual(['done', 'done', 'failed', 'todo'])
   })
 })

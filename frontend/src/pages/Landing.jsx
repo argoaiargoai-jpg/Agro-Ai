@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
-import { ArrowRight, BarChart3, Camera, CheckCircle2, CloudUpload, History, Leaf as LeafIcon, ShieldCheck, Smartphone, Sprout, Sparkles, Zap } from 'lucide-react'
+import { Apple, ArrowRight, BarChart3, Camera, Carrot, Flower2, TreePine, Wheat, Sun, CheckCircle2, CloudUpload, History, Leaf as LeafIcon, ShieldCheck, Smartphone, Sprout, Sparkles, Zap } from 'lucide-react'
 import { Logo } from '../components/ui'
+import { FieldRows } from '../components/AgriArt'
 import { Leaf, Reveal } from '../components/Reveal'
 import { useAuth } from '../context/AuthContext'
 
@@ -17,8 +18,8 @@ const STEPS = [
   { icon: CloudUpload, title: 'Analyze', text: 'AGRO AI processes the image and prepares a plain-language health report.' },
   { icon: CheckCircle2, title: 'Act', text: 'Review findings, keep them in your history, and share with your agronomist.' },
 ]
-// The crops our specialized AGRO AI ML model is trained on (see /ml/info). Other plants get AI-powered analysis only.
-const CROPS = ['Tomato', 'Potato', 'Corn', 'Apple', 'Grape', 'Peach', 'Cherry', 'Strawberry', 'Soybean', 'Bell Pepper']
+// Kinds of plant material AGRO AI can look at (a wide range, never a promise about every species or every disease).
+const KINDS = [[LeafIcon, 'Leaves'], [Flower2, 'Flowers'], [Apple, 'Fruit'], [Carrot, 'Vegetables'], [Wheat, 'Cereals & field crops'], [Sprout, 'Seedlings'], [TreePine, 'Trees & shrubs'], [Sun, 'Garden & house plants']]
 const WHY = ['Spot problems days earlier than a walk-through', 'One place for every photo, note and field check', 'Share clear records with agronomists and advisors', 'Simple enough for the whole farm team']
 
 export default function Landing() {
@@ -30,7 +31,7 @@ export default function Landing() {
         <div className="container nav-in">
           <Logo />
           <nav className="nav-links" aria-label="Sections">
-            <a href="#features">Features</a><a href="#how">How it works</a><a href="#crops">Crops</a>
+            <a href="#features">Features</a><a href="#how">How it works</a><a href="#plants">Plants</a>
           </nav>
           <div className="nav-actions">
             {authed ? <Link to="/dashboard" className="btn btn-primary btn-sm">Open dashboard</Link> : (<>
@@ -78,15 +79,15 @@ export default function Landing() {
           </div>
         </section>
 
-        <div className="marquee" aria-label="Crops">
+        <div className="marquee" aria-label="Kinds of plants">
           <div className="marquee-track">
-            {[...CROPS, ...CROPS].map((c, i) => <span key={i} className="crop-chip"><LeafIcon size={16} /> {c}</span>)}
+            {[...KINDS, ...KINDS].map(([I, c], i) => <span key={i} className="crop-chip"><I size={16} /> {c}</span>)}
           </div>
         </div>
 
         <section className="section" id="features">
           <div className="container">
-            <Reveal className="section-head"><h2>Everything you need to monitor your crops</h2><p>A focused toolkit for growers, agronomists and farm teams.</p></Reveal>
+            <Reveal className="section-head"><h2>Everything you need to monitor your plants</h2><p>A focused toolkit for growers, agronomists and farm teams.</p></Reveal>
             <div className="grid grid-3">
               {FEATURES.map(({ icon: I, title, text }, i) => (
                 <Reveal key={title} as="article" delay={(i % 3) * 90} className="card feature"><div className="stat-icon"><I size={22} /></div><h3>{title}</h3><p>{text}</p></Reveal>
@@ -121,10 +122,11 @@ export default function Landing() {
           </div>
         </section>
 
-        <section className="section" id="crops" style={{ paddingTop: 20 }}>
+        <section className="section" id="plants" style={{ paddingTop: 20 }}>
           <div className="container">
-            <Reveal className="section-head"><h2>Crops our ML model is trained on</h2><p>The AGRO AI ML model is specialized for these crops. For other plants, AGRO AI&rsquo;s AI-powered analysis still gives guidance, with less certainty.</p></Reveal>
-            <Reveal variant="zoom" className="crops">{CROPS.map((c) => <span key={c} className="crop-chip"><LeafIcon size={16} /> {c}</span>)}</Reveal>
+            <Reveal className="section-head"><h2>From the field to the garden</h2><p>Upload a photo of a plant, leaf, flower, fruit, or crop. AGRO AI combines deep learning, plant identification, specialized agricultural AI and generative AI to analyze a wide range of plant and crop conditions.</p></Reveal>
+            <Reveal variant="zoom" className="crops">{KINDS.map(([I, c]) => <span key={c} className="cat-chip"><I size={16} /> {c}</span>)}</Reveal>
+            <FieldRows className="plant-art" />
           </div>
         </section>
 

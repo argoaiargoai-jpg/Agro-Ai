@@ -55,7 +55,17 @@ services:
         sync: false
       - key: GOOGLE_CLIENT_SECRET      # secret: Render only, never Netlify
         sync: false
-      - key: GEMINI_API_KEY
+      - key: GEMINI_API_KEY_1          # two Gemini keys: used alternately (DB counter) with automatic failover
+        sync: false
+      - key: GEMINI_API_KEY_2
+        sync: false
+      - key: PLANTNET_API_KEY          # specialist providers (optional; skipped when unset): plant identification
+        sync: false
+      - key: PLANTIX_API_KEY           # crop disease analysis
+        sync: false
+      - key: KINDWISE_API_KEY          # crop.health
+        sync: false
+      - key: GEMINI_API_KEY            # legacy single-key name, still read as key 1 when GEMINI_API_KEY_1 is empty
         sync: false
       - key: GEMINI_MODEL
         value: gemini-3.8-flash

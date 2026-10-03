@@ -12,8 +12,8 @@ import time
 
 import httpx
 
-from app.ai import safety
-from app.ai.base import (AIProvider, AIRequest, AIResponse, ProviderBadResponse, ProviderBlocked, ProviderMisconfigured,
+from app.ai import keyring, safety
+from app.ai.base import (AIProvider, AIRequest, AIResponse, ProviderBadResponse, ProviderBlocked, ProviderError, ProviderMisconfigured,
                          ProviderNotConfigured, ProviderRateLimited, ProviderTimeout, ProviderUnavailable)
 from app.core.config import Settings
 
@@ -26,9 +26,10 @@ class GeminiProvider(AIProvider):
     name = "gemini"
     display_name = "Google Gemini"
 
-    def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None):
+    def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None, selector=None):
         self._s = settings
         self._transport = transport
+        self._select = selector or keyring.primary_index        # (key_count) -> index of the key to try first; DB-backed in production
 
     @property
     def model(self) -> str:
@@ -45,26 +46,58 @@ class GeminiProvider(AIProvider):
         return self._generate(request.system_instruction, parts, request.json_schema)
 
     def ping(self) -> dict:
+        """Checks EVERY configured key (no counter use, no failover): the admin must see if one of them is broken."""
         t0 = time.perf_counter()
-        r = self._generate("Reply with JSON only.", [{"text": 'Return exactly {"ok": true}.'}],
-                           {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}, max_tokens=64)
-        return {"ok": bool(r.data.get("ok")), "latency_ms": round((time.perf_counter() - t0) * 1000), "model": r.model}
+        schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}
+        results, model, first_error = [], self.model, None
+        for slot, key in self._s.gemini_keys():
+            try:
+                r = self._call([(slot, key)], "Reply with JSON only.", [{"text": 'Return exactly {"ok": true}.'}], schema, 64, retries=0)
+                model = r.model
+                results.append({"slot": slot, "ok": bool(r.data.get("ok"))})
+            except ProviderError as exc:
+                first_error = first_error or exc
+                results.append({"slot": slot, "ok": False, "state": exc.ai_status})
+        if not results:
+            raise ProviderNotConfigured("no Gemini key configured")
+        if not any(x["ok"] for x in results) and first_error:
+            raise first_error
+        return {"ok": all(x["ok"] for x in results), "latency_ms": round((time.perf_counter() - t0) * 1000), "model": model, "keys": results}
 
     # ------------------------------------------------------------------ internals
     def _secrets(self) -> list[str]:
-        return [self._s.gemini_api_key.get_secret_value()]
+        return [k for _, k in self._s.gemini_keys()]
 
     def _safe(self, text: str) -> str:
         return safety.redact(text, self._secrets())[:300]
 
     def _generate(self, system: str, parts: list[dict], schema: dict | None, max_tokens: int = 8192) -> AIResponse:
-        key = self._s.gemini_api_key.get_secret_value().strip()
-        if not key:
-            raise ProviderNotConfigured("GEMINI_API_KEY is empty")
+        """One logical Gemini request. With two keys: the counter picks the primary key, and if it fails the SAME request is retried once on
+        the other key (2 attempts in total, never more; the counter is not incremented again). With one key the old retry policy applies."""
+        keys = self._s.gemini_keys()
+        if not keys:
+            raise ProviderNotConfigured("no Gemini key configured")
+        if len(keys) == 1:
+            return self._call(keys, system, parts, schema, max_tokens, retries=max(self._s.ai_max_retries, 0))
+        first = self._select(len(keys)) % len(keys)
+        order = [keys[first], keys[1 - first]]
+        try:
+            r = self._call([order[0]], system, parts, schema, max_tokens, retries=0)
+        except ProviderBlocked:
+            raise                                         # a safety block is about the image: the other key would answer the same
+        except ProviderError as exc:
+            log.warning("Gemini primary key (slot %s) failed (%s); trying the fallback key (slot %s)", order[0][0], exc.ai_status, order[1][0])
+            r = self._call([order[1]], system, parts, schema, max_tokens, retries=0)
+            log.info("Gemini primary key (slot %s) failed; fallback key (slot %s) succeeded", order[0][0], order[1][0])
+            return r
+        return r
+
+    def _call(self, keys: list[tuple[int, str]], system: str, parts: list[dict], schema: dict | None, max_tokens: int, retries: int) -> AIResponse:
+        slot, key = keys[0]
         url = f"{self._s.gemini_base_url.rstrip('/')}/v1beta/models/{self._s.gemini_model}:generateContent"
         headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
         use_schema = schema is not None
-        attempts = 1 + max(self._s.ai_max_retries, 0)
+        attempts = 1 + max(retries, 0)
         last: Exception | None = None
         i = 0
         while i < attempts:
@@ -79,20 +112,20 @@ class GeminiProvider(AIProvider):
                 with httpx.Client(timeout=httpx.Timeout(self._s.ai_timeout_seconds), transport=self._transport) as c:
                     resp = c.post(url, headers=headers, json=body)
             except httpx.TimeoutException as exc:
-                last = ProviderTimeout(f"timeout after {self._s.ai_timeout_seconds}s ({type(exc).__name__})")
+                last = ProviderTimeout(f"timeout after {self._s.ai_timeout_seconds}s ({type(exc).__name__}) on key slot {slot}")
             except httpx.TransportError as exc:
-                last = ProviderUnavailable(f"network error ({type(exc).__name__})")
+                last = ProviderUnavailable(f"network error ({type(exc).__name__}) on key slot {slot}")
             else:
                 latency = (time.perf_counter() - t0) * 1000
                 status = resp.status_code
                 if status == 200:
                     return self._parse(resp, latency)
                 err_msg = self._error_message(resp)
-                log.warning("Gemini HTTP %s: %s", status, self._safe(err_msg))
+                log.warning("Gemini HTTP %s on key slot %s: %s", status, slot, self._safe(err_msg))
                 if status == 429:
                     raise ProviderRateLimited(err_msg and self._safe(err_msg), retry_after=self._retry_after(resp))
                 if status in (401, 403, 404) or (status == 400 and re.search(r"api key|API_KEY|permission|not found|not supported for generateContent", err_msg, re.I)):
-                    raise ProviderMisconfigured(f"HTTP {status}: {self._safe(err_msg)}")
+                    raise ProviderMisconfigured(f"HTTP {status} (key slot {slot}): {self._safe(err_msg)}")
                 if status == 400 and use_schema and re.search(r"schema|response_json_schema|responseJsonSchema|response_schema", err_msg, re.I):
                     use_schema = False            # model rejected our schema dialect: retry once relying on the prompt + our validation
                     log.warning("Gemini rejected the response schema; retrying without it")
@@ -106,7 +139,6 @@ class GeminiProvider(AIProvider):
                 _SLEEP(0.5 * 2 ** (i - 1))
         assert last is not None
         raise last
-
     @staticmethod
     def _error_message(resp: httpx.Response) -> str:
         try:

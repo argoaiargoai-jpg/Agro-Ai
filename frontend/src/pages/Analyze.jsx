@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Camera, CameraOff, ImagePlus, RefreshCw, UploadCloud, X } from 'lucide-react'
-import { PageHead } from '../components/AnalysisBits'
+import { Bug, Camera, CameraOff, Flower2, ImagePlus, Leaf, RefreshCw, ScanLine, ShieldCheck, Sprout, Stethoscope, UploadCloud, X } from 'lucide-react'
+import { LeafScanArt } from '../components/AgriArt'
 import { ScanPreview, StageList } from '../components/Scan'
 import { Alert, Button, Field } from '../components/ui'
 import { useConfig } from '../context/ConfigContext'
 import { useToast } from '../context/ToastContext'
 import { api, ApiError, errorMessage } from '../lib/api'
 import { fmtBytes } from '../lib/format'
+import { buildSteps } from '../lib/outcome'
 
 const TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
@@ -97,7 +98,8 @@ export default function Analyze() {
   const [drag, setDrag] = useState(false)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [stage, setStage] = useState(null) // null | 'uploading' | 'ml' | 'guidance'  (real backend stages, no fake progress)
+  const [stage, setStage] = useState(null) // null | 'uploading' | 'ml' | 'ml_done' | 'identify' | 'disease' | 'guidance' | 'done' (what the backend reports)
+  const [plan, setPlan] = useState(['guidance'])
   const input = useRef(null)
   const maxBytes = config.max_upload_mb * 1024 * 1024
 
@@ -122,17 +124,22 @@ export default function Analyze() {
     const form = new FormData()
     form.append('file', file)
     form.append('source', source)
-    if (crop) form.append('crop_type', crop)
+    if (crop.trim()) form.append('crop_type', crop.trim())
     if (notes.trim()) form.append('notes', notes.trim())
     let poll
     try {
       setStage('uploading')
       const a = await api.upload('/analyses', form)
       setStage('ml')
-      // The backend commits the first stage before it starts the second, so we can show what is REALLY happening.
+      // The backend commits its stage before each real step, so what we show here is what is REALLY happening.
       poll = setInterval(async () => {
-        try { const cur = await api.get(`/analyses/${a.id}`); if (cur.result?.stage === 'ml_done') setStage('guidance') } catch { /* keep waiting */ }
-      }, 1000)
+        try {
+          const cur = await api.get(`/analyses/${a.id}`)
+          if (Array.isArray(cur.result?.plan)) setPlan(cur.result.plan)
+          const st = cur.result?.stage
+          if (st && ['ml_done', 'identify', 'disease', 'guidance'].includes(st)) setStage(st)
+        } catch { /* keep waiting */ }
+      }, 900)
       let ok = true
       try { await api.post(`/analyses/${a.id}/analyze`) }
       catch (e) { ok = false; toast(errorMessage(e), 'error') } // the result page explains the state and offers a retry
@@ -146,23 +153,46 @@ export default function Analyze() {
     } finally { clearInterval(poll); setBusy(false) }
   }
 
+  const steps = buildSteps(plan)
+  const analysing = busy && stage
+
   return (
     <>
-      <PageHead title="Analyze a crop" subtitle="Upload a plant image and let AGRO AI analyze it. A clear, well-lit photo of a single leaf works best." />
-      <div className="grid grid-main">
-        <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <section className="an-hero" aria-labelledby="an-title">
+        <div className="an-hero-copy">
+          <span className="eyebrow"><ScanLine size={14} /> AI plant analysis</span>
+          <h1 id="an-title">Analyze a plant</h1>
+          <p className="an-lead">Upload a photo of a plant, leaf, flower, fruit, or crop for AI-powered analysis.</p>
+          <p className="an-sub">AGRO AI combines deep learning, plant identification, specialized agricultural AI, and generative AI to analyze a wide range of plant and crop conditions.</p>
+          <ul className="an-chips" aria-label="What you can analyze">
+            <li><Leaf size={15} /> Leaves</li><li><Flower2 size={15} /> Flowers</li><li><Sprout size={15} /> Crops</li><li><Stethoscope size={15} /> Diseases</li><li><Bug size={15} /> Pests &amp; damage</li><li><ShieldCheck size={15} /> Healthy plants</li>
+          </ul>
+        </div>
+        <LeafScanArt className="an-hero-art" />
+      </section>
+
+      <div className="grid grid-main an-grid">
+        <div className="card card-pad an-main">
           {config.maintenance_mode && <Alert tone="warn">AGRO AI is in maintenance mode, so new uploads are paused.</Alert>}
           {error && <Alert tone="error">{error}</Alert>}
           {file ? (
-            busy ? (
+            analysing ? (
               <div className="analyze-hero">
                 <ScanPreview src={preview} active={stage !== 'done'} alt="Your image being analyzed" />
-                <StageList stage={stage || 'uploading'} />
+                <p className="file-line"><span className="file-name">{file.name}</span><span className="muted">{fmtBytes(file.size)}</span></p>
               </div>
             ) : (
-              <div className="preview">
-                <img src={preview} alt="Selected crop" />
-                <Button variant="secondary" size="sm" className="remove" icon={X} onClick={() => setFile(null)} aria-label="Remove image">Remove</Button>
+              <div className="selected">
+                <div className="preview"><img src={preview} alt="Selected plant" /></div>
+                <div className="file-line">
+                  <span className="file-ico"><Leaf size={16} /></span>
+                  <span className="file-name" title={file.name}>{file.name}</span><span className="muted">{fmtBytes(file.size)}</span>
+                  <span className="file-actions">
+                    <Button variant="secondary" size="sm" icon={RefreshCw} onClick={() => input.current?.click()}>Change</Button>
+                    <Button variant="secondary" size="sm" icon={X} onClick={() => setFile(null)} aria-label="Remove image">Remove</Button>
+                  </span>
+                  <input ref={input} type="file" accept={TYPES.join(',')} hidden onChange={(e) => { pick(e.target.files?.[0]); e.target.value = '' }} />
+                </div>
               </div>
             )
           ) : (
@@ -173,36 +203,41 @@ export default function Analyze() {
               </div>
               {tab === 'upload' ? (
                 <div
-                  className={`dropzone${drag ? ' drag' : ''}`} role="button" tabIndex={0}
+                  className={`dropzone dz-rich${drag ? ' drag' : ''}`} role="button" tabIndex={0} aria-label="Upload a plant photo: drag and drop or press Enter to browse"
                   onClick={() => input.current?.click()}
                   onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), input.current?.click())}
                   onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
                   onDragLeave={() => setDrag(false)}
                   onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files?.[0]) }}
                 >
-                  <div className="state-icon"><ImagePlus size={26} /></div>
-                  <strong>Drag a photo here, or click to browse</strong>
+                  <span className="dz-ring" aria-hidden="true" />
+                  <div className="state-icon dz-icon"><ImagePlus size={28} /></div>
+                  <strong>{drag ? 'Drop your photo to begin' : 'Drag a photo here, or click to browse'}</strong>
                   <p className="small muted">JPEG, PNG or WebP · up to {config.max_upload_mb} MB</p>
+                  <span className="btn btn-primary btn-sm dz-cta"><UploadCloud size={15} /> Choose photo</span>
                   <input ref={input} type="file" accept={TYPES.join(',')} hidden data-testid="file-input"
                     onChange={(e) => { pick(e.target.files?.[0]); e.target.value = '' }} />
                 </div>
               ) : <CameraCapture onCapture={(f) => pick(f, 'camera')} />}
+              <p className="tip-line"><Sprout size={14} /> Tip: natural light and a sharp, close photo of the affected area help the analysis.</p>
             </>
           )}
         </div>
 
-        <div className="card card-pad">
-          <form className="form" onSubmit={(e) => { e.preventDefault(); submit() }}>
-            <Field as="select" label="Crop (optional)" value={crop} onChange={(e) => setCrop(e.target.value)}>
-              <option value="">Not sure / other</option>
-              {config.supported_crops.map((c) => <option key={c}>{c}</option>)}
-            </Field>
-            <Field as="textarea" label="Notes (optional)" maxLength={1000} placeholder="e.g. Yellow spots on lower leaves, started last week" value={notes} onChange={(e) => setNotes(e.target.value)} />
-            <Button type="submit" size="lg" block loading={busy && stage !== 'done'} disabled={!file || busy || config.maintenance_mode} icon={UploadCloud}>
-              {stage === 'uploading' ? 'Uploading…' : stage === 'done' ? 'Done' : stage ? 'Analyzing…' : 'Analyze image'}
-            </Button>
-            <p className="field-hint">Your photo is stored privately and only visible to you.</p>
-          </form>
+        <div className="an-side">
+          {analysing ? (
+            <div className="card card-pad"><StageList steps={steps} stage={stage} title="AGRO AI analysis" /></div>
+          ) : (
+            <div className="card card-pad">
+              <form className="form" onSubmit={(e) => { e.preventDefault(); submit() }}>
+                <Field label="Plant or crop (optional)" value={crop} maxLength={60} onChange={(e) => setCrop(e.target.value)}
+                  placeholder="e.g. tomato, rose, mango" hint="If you know what it is, tell us. Otherwise AGRO AI will work it out." />
+                <Field as="textarea" label="Notes (optional)" maxLength={1000} placeholder="e.g. Yellow spots on lower leaves, started last week" value={notes} onChange={(e) => setNotes(e.target.value)} />
+                <Button type="submit" size="lg" block loading={busy} disabled={!file || busy || config.maintenance_mode} icon={ScanLine}>Analyze image</Button>
+                <p className="field-hint">Your photo is stored privately and only visible to you.</p>
+              </form>
+            </div>
+          )}
         </div>
       </div>
     </>

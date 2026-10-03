@@ -1,7 +1,12 @@
 def test_health(client):
     r = client.get("/api/v1/health")
     assert r.status_code == 200
-    assert r.json()["status"] == "ok" and r.json()["database"] == "ok"
+    assert r.json()["status"] == "ok" and r.json()["database"] == "ok" and r.json()["commit"] is None
+
+
+def test_health_reports_the_running_commit_when_the_platform_provides_it(client, monkeypatch):
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "0123456789abcdef0123456789abcdef01234567")
+    assert client.get("/api/v1/health").json()["commit"] == "0123456"
 
 
 def test_public_config(client):

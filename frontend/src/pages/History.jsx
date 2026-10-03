@@ -28,7 +28,7 @@ export default function History() {
 
   return (
     <>
-      <PageHead title="History" subtitle="Every crop scan you've submitted." />
+      <PageHead title="History" subtitle="Every plant analysis you've submitted." />
       <div className="card">
         <div className="toolbar">
           <label className="search"><span className="sr-only">Search</span><Search size={17} /><input className="input" placeholder="Search by crop or filename" value={q} onChange={(e) => setQ(e.target.value)} /></label>
@@ -46,7 +46,7 @@ export default function History() {
         ) : data.items.length === 0 ? (
           filtered
             ? <EmptyState icon={Search} title="No matching scans">Try a different search or clear the filters.</EmptyState>
-            : <EmptyState icon={HistoryIcon} title="Nothing here yet" action={<Link to="/analyze" className="btn btn-primary">Analyze a crop</Link>}>Your scans will appear here once you submit a photo.</EmptyState>
+            : <EmptyState icon={HistoryIcon} title="Nothing here yet" action={<Link to="/analyze" className="btn btn-primary">Analyze a plant</Link>}>Your scans will appear here once you submit a photo.</EmptyState>
         ) : (
           <>
             <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity .15s' }}>

@@ -204,14 +204,15 @@ def test_real_model_disease_goes_to_the_ai_as_advice_only(client, admin_auth, sc
 
 
 @needs_data
-def test_real_model_healthy_is_inspected_independently_by_the_ai(client, user_auth, sc):
+def test_real_model_healthy_goes_to_the_ai_with_context_and_is_still_inspected(client, user_auth, sc):
     r = first_with_state(lambda r: r["label_out"] == "Grape___healthy", "HEALTHY")
     sc.respond(payload(crop="Grape", plant="Grape"))
     b = analyze(client, user_auth, r)
     assert b["result"]["ml"]["classification_type"] == "HEALTHY" and b["result"]["ml"]["model_version"] == "colab"
     assert b["result"]["final"]["status"] == "HEALTHY"
     req = sc.requests[0]
-    assert req.image and "ML_HEALTHY" in req.prompt and "ALREADY identified" not in req.prompt and "Grape" not in req.prompt          # independent: ML result withheld
+    # confident (>= 80%): the image goes to the AI together with our result as CONTEXT; the AI still inspects independently and is not told to copy it
+    assert req.image and "ML_HEALTHY" in req.prompt and "ALREADY identified" not in req.prompt and "Inspect the image yourself" in req.prompt
 
 
 @needs_data

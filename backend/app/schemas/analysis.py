@@ -35,7 +35,7 @@ class AnalysisPage(BaseModel):
     page_size: int
 
 
-INTERNAL_RESULT_KEYS = ("ai", "prompt_version", "ai_case")
+INTERNAL_RESULT_KEYS = ("ai", "prompt_version", "ai_case", "route", "specialists")
 INTERNAL_FINAL_KEYS = ("disagreement", "disease_source", "ml_state")
 
 

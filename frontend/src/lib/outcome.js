@@ -33,15 +33,37 @@ export function headline(a) {
   return OUTCOME[outcome].label
 }
 
-/** Real analysis stage -> which of the 4 visible steps is done / active. Based only on backend state. */
-export const STEPS = [
-  { key: 'received', label: 'Image received' },
-  { key: 'ml', label: 'AGRO AI ML model', hint: 'Preprocessing and ML-powered image analysis' },
-  { key: 'intel', label: 'Agricultural intelligence', hint: 'Generating agricultural guidance' },
-  { key: 'final', label: 'Final result' },
-]
-const ORDER = { uploading: 0, ml: 1, guidance: 2, done: 4 }
-export function stepState(stage, index) {
-  const at = ORDER[stage] ?? 0
-  return index < at ? 'done' : index === at ? 'now' : 'todo'
+/**
+ * The visible analysis steps. They follow the REAL backend workflow: `plan` is what the backend says will run
+ * (e.g. ["guidance"], ["disease","guidance"], ["identify","disease","guidance"]). Labels are generic: no provider is ever named.
+ */
+export const STEP_LABELS = {
+  received: { label: 'Image received' },
+  ml: { label: 'AGRO AI deep-learning analysis', hint: 'Examining the image' },
+  identify: { label: 'Plant identification', hint: 'Identifying the plant' },
+  disease: { label: 'Agricultural disease analysis', hint: 'Checking for diseases and disorders' },
+  guidance: { label: 'AI guidance', hint: 'Generating agricultural guidance' },
+  final: { label: 'Final result' },
+}
+
+export function buildSteps(plan) {
+  const mid = (Array.isArray(plan) ? plan : ['guidance']).filter((k) => STEP_LABELS[k])      // [] = the backend stopped after the first stage
+  return ['received', 'ml', ...mid, 'final'].map((key) => ({ key, ...STEP_LABELS[key] }))
+}
+
+/**
+ * state per step: 'done' | 'now' | 'todo' | 'failed'.
+ * stage: 'uploading' | 'ml' | 'ml_done' | 'identify' | 'disease' | 'guidance' | 'done'  (what the backend reports)
+ * failedAt: step key that failed (e.g. 'guidance'): earlier steps are done, that one is 'failed', later ones stay 'todo'.
+ */
+export function stepStates(steps, stage, failedAt = null) {
+  const keys = steps.map((s) => s.key)
+  if (failedAt && keys.includes(failedAt)) {
+    const f = keys.indexOf(failedAt)
+    return keys.map((_, i) => (i < f ? 'done' : i === f ? 'failed' : 'todo'))
+  }
+  if (stage === 'done') return keys.map(() => 'done')
+  const active = stage === 'uploading' ? 'received' : stage === 'ml' ? 'ml' : stage === 'ml_done' ? keys[2] : keys.includes(stage) ? stage : 'received'
+  const at = keys.indexOf(active)
+  return keys.map((_, i) => (i < at ? 'done' : i === at ? 'now' : 'todo'))
 }

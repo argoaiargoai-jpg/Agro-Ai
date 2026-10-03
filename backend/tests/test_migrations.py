@@ -116,3 +116,34 @@ def test_a_legacy_style_row_works_through_the_running_api(client, user_auth):
     assert client.get("/api/v1/analyses", headers=user_auth).json()["total"] == 1
     assert client.get("/api/v1/analyses/summary", headers=user_auth).status_code == 200
     assert client.post(f"/api/v1/analyses/{aid}/analyze", headers=user_auth).json()["id"] == aid        # completed -> served from storage, no model needed
+
+
+# ----------------------------------------------------------------------------- 0003: counters (alternating Gemini keys)
+def tables(db: Path) -> set[str]:
+    with sqlite3.connect(db) as c:
+        return {r[0] for r in c.execute("select name from sqlite_master where type='table'")}
+
+
+def test_0003_adds_the_counters_table_and_downgrade_removes_only_it(phase1_db):
+    alembic(phase1_db, "upgrade", "0002")
+    assert "counters" not in tables(phase1_db)
+    before = legacy_rows(phase1_db)
+    alembic(phase1_db, "upgrade", "head")
+    assert "counters" in tables(phase1_db) and legacy_rows(phase1_db) == before
+    with sqlite3.connect(phase1_db) as c:
+        assert [r[1] for r in c.execute("pragma table_info(counters)")] == ["name", "value"]
+    alembic(phase1_db, "downgrade", "0002")
+    assert "counters" not in tables(phase1_db) and "analyses" in tables(phase1_db) and legacy_rows(phase1_db) == before
+    alembic(phase1_db, "upgrade", "head")
+    assert "counters" in tables(phase1_db)
+
+
+def test_counter_upsert_is_atomic_on_a_migrated_database(tmp_path):
+    db = tmp_path / "c.db"
+    alembic(db, "upgrade", "head")
+    assert "No new upgrade operations detected" in alembic(db, "check")
+    code = ("import os; os.environ['DATABASE_URL']='sqlite:///%s'; from app.ai import keyring; "
+            "print([keyring.next_number() for _ in range(5)])" % db)
+    r = subprocess.run([sys.executable, "-c", code], cwd=BACKEND, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().endswith("[1, 2, 3, 4, 5]")

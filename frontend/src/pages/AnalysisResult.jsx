@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Check, Clock, Cpu, Eye, HelpCircle, ImageOff, ScanLine, ShieldCheck, Sparkles, Sprout, Trash2, TriangleAlert } from 'lucide-react'
+import { Activity, AlertTriangle, Wind, ArrowLeft, Check, Clock, Cpu, Eye, Pill, HelpCircle, ImageOff, ScanLine, ShieldCheck, Sparkles, Sprout, Trash2, TriangleAlert } from 'lucide-react'
 import AuthedImage from '../components/AuthedImage'
 import { PageHead, StatusBadge } from '../components/AnalysisBits'
 import { Alert, Button, EmptyState, ErrorState, Modal, Skeleton } from '../components/ui'
+import { StageList } from '../components/Scan'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { api, ApiError, errorMessage } from '../lib/api'
 import { fmtBytes, fmtDateTime } from '../lib/format'
+import { buildSteps } from '../lib/outcome'
 import { useAsync } from '../lib/useAsync'
 
 const TYPE = {
@@ -33,7 +35,7 @@ function BasicResult({ ml }) {
         <div className="res-bar"><i style={{ width: `${pct}%` }} /></div>
       </div>
       {(ml.classification_type === 'UNKNOWN' || ml.classification_type === 'NO_PLANT') && (
-        <p className="small muted" style={{ marginTop: 12 }}>AGRO AI currently supports: {ml.supported_crops.join(', ')}. For best results, photograph a single leaf in good light.</p>
+        <div className="res-cta"><Link to="/analyze" className="btn btn-primary"><ScanLine size={18} /> Upload another photo</Link></div>
       )}
     </div>
   )
@@ -52,7 +54,7 @@ function Section({ title, items, tone, icon: Icon }) {
   if (!items || items.length === 0) return null
   return (
     <section className={`rep-sec${tone ? ` ${tone}` : ''}`}>
-      <h4>{Icon && <Icon size={16} />}{title}</h4>
+      <h4>{Icon && <span className="rep-icon"><Icon size={16} /></span>}{title}</h4>
       <ul>{items.map((t, i) => <li key={i}>{t}</li>)}</ul>
     </section>
   )
@@ -89,14 +91,14 @@ function ReportDetails({ f }) {
         <div className="rep-grid">
           <Section title="Symptoms observed" items={f.symptoms} icon={Eye} />
           <Section title={f.status === 'HEALTHY' ? 'Care recommendations' : 'Immediate actions'} items={f.immediate_actions} icon={Check} />
-          <Section title={f.status === 'HEALTHY' ? 'Additional care' : 'Treatment & remedies'} items={f.treatment} />
+          <Section title={f.status === 'HEALTHY' ? 'Additional care' : 'Treatment & remedies'} items={f.treatment} icon={Pill} />
           <Section title="Prevention" items={f.prevention} icon={ShieldCheck} />
           {f.spread_risk && (f.spread_risk.level !== 'unknown' || f.spread_risk.explanation) && (
-            <section className="rep-sec"><h4>Spread risk: <span className={`pill risk-${f.spread_risk.level}`}>{RISK[f.spread_risk.level]}</span></h4>
+            <section className="rep-sec"><h4><span className="rep-icon"><Wind size={16} /></span>Spread risk: <span className={`pill risk-${f.spread_risk.level}`}>{RISK[f.spread_risk.level]}</span></h4>
               {f.spread_risk.explanation && <p className="small">{f.spread_risk.explanation}</p>}</section>
           )}
           <Section title="Warnings" items={f.warnings} tone="warn" icon={TriangleAlert} />
-          <Section title="Monitoring & recovery" items={f.monitoring} />
+          <Section title="Monitoring & recovery" items={f.monitoring} icon={Activity} />
           {f.ai_notes && <section className="rep-sec"><h4><Sparkles size={16} />Additional notes</h4><p className="small">{f.ai_notes}</p></section>}
         </div>
       )}
@@ -159,12 +161,9 @@ export default function AnalysisResult() {
   const final = a?.result?.final
   const mlOnly = a?.result?.stage === 'ml_only'
   const failed = a?.result?.stage === 'guidance_failed'
-  const steps = [
-    ['Image received', !!a],
-    ['AGRO AI ML model analysis', !!ml],
-    [failed ? 'Agricultural intelligence (temporarily unavailable)' : mlOnly ? 'Agricultural intelligence (not available)' : 'Agricultural intelligence', !!final || mlOnly],
-    [failed ? 'Final result (basic result shown)' : 'Final result', !!final || (!!ml && mlOnly)],
-  ]
+  const failedAt = failed ? 'guidance' : null
+  // finished = the backend produced a final result, or it intentionally stopped after the first stage (guidance off / not set up)
+  const progressStage = !a ? 'uploading' : final || mlOnly ? 'done' : ml ? (a.result?.stage === 'ml_done' ? 'ml_done' : a.result?.stage || 'ml_done') : 'ml'
 
   async function retryGuidance() {            // no ?force: the stored ML result is kept, only the guidance step runs again
     setRunning(true)
@@ -201,20 +200,12 @@ export default function AnalysisResult() {
         <div style={{ display: 'grid', gap: 18 }}>
           {final && <ReportSummary f={final} />}
           {ml && !final && <BasicResult ml={ml} />}
-          <div className="card card-pad">
+          <div className="card card-pad res-in">
             <div className="res-badges" style={{ marginTop: 0, marginBottom: 14 }}>
-              <span className="mlbadge"><Cpu size={14} /> AGRO AI ML MODEL</span>
-              {final && <span className="mlbadge"><Sparkles size={14} /> AGRO AI Intelligence</span>}
+              <span className="mlbadge"><Cpu size={14} /> AGRO AI deep learning</span>
+              {final && <span className="mlbadge"><Sparkles size={14} /> AI guidance</span>}
             </div>
-            <h3 style={{ fontSize: 16, marginBottom: 16 }}>Analysis progress</h3>
-            <div className="timeline">
-              {steps.map(([label, done]) => (
-                <div key={label} className={`tl-item${done ? ' done' : ''}`}>
-                  <div className={`tl-dot${done ? '' : ' todo'}`}>{done ? <Check size={15} /> : <Clock size={14} />}</div>
-                  <div><strong>{label}</strong></div>
-                </div>
-              ))}
-            </div>
+            <StageList compact title="Analysis progress" steps={buildSteps(a?.result?.plan)} stage={progressStage} failedAt={failedAt} onRetry={failedAt ? retryGuidance : null} />
           </div>
 
           {a && a.status === 'failed' && (

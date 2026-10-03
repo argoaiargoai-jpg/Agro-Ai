@@ -15,6 +15,7 @@ from app.ai import imaging, prompts, safety
 from app.ai.base import AIProvider, ProviderBadResponse, ProviderRateLimited
 from app.ai.schemas import AIAnalysis, AnalysisReport, Disagreement
 from app.core.config import Settings
+from app.services import routing
 
 log = logging.getLogger("agroai.workflow")
 
@@ -58,13 +59,13 @@ def _guidance(ai: AIAnalysis) -> dict:
                 warnings=warnings, ai_notes=ai.ai_notes, identification_confidence=ai.identification_confidence, **out)
 
 
-def build_report(ml: dict, ai: AIAnalysis) -> AnalysisReport:
+def build_report(ml: dict, ai: AIAnalysis, route: str = "A") -> AnalysisReport:
     state = ml["classification_type"]
     g = _guidance(ai)
     base = dict(ml_state=state, disclaimer=DISCLAIMER, **g)
     ml_text = _ml_label(ml)
 
-    if state == "DISEASE":                                           # identity is OURS; AI = explanation only
+    if state == "DISEASE" and route == "A":                          # confident: identity is OURS; AI = explanation only
         crop, disease = ml.get("crop"), ml.get("disease")
         dis = None
         if ai.ml_consistency == "inconsistent":
@@ -74,7 +75,7 @@ def build_report(ml: dict, ai: AIAnalysis) -> AnalysisReport:
         return AnalysisReport(status="DISEASE", headline=f"{crop} — {disease}", plant=crop, crop=crop, disease=disease,
                               disease_source="ml", disagreement=dis, **base)
 
-    # HEALTHY / UNKNOWN / NO_PLANT: the AI analysed independently
+    # HEALTHY / UNKNOWN / NO_PLANT (and DISEASE when our confidence was below the trust threshold): the AI analysed independently
     plant = ai.plant or (ml.get("crop") if state == "HEALTHY" else None)
     crop = ai.crop or (ml.get("crop") if state == "HEALTHY" else None)
 
@@ -109,10 +110,17 @@ def build_report(ml: dict, ai: AIAnalysis) -> AnalysisReport:
                           disagreement=disagreement, **base)
 
 
-def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Settings) -> tuple[AIAnalysis, AnalysisReport, str]:
-    """Image + ML result -> validated AI analysis + final report. Raises ProviderError subclasses; never fabricates."""
+def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Settings, on_stage=None) -> tuple[AIAnalysis, AnalysisReport, str, dict]:
+    """Image + our result -> (route-dependent specialist evidence) -> Gemini -> validated AI analysis + final report.
+    Returns (ai, report, case, info) where info = {"route", "plan_done", "specialists"} (internal bookkeeping). Raises ProviderError subclasses;
+    never fabricates. `on_stage(name)` is called with "identify" / "disease" / "guidance" as each real step starts."""
     jpeg, mime = imaging.prepare_for_provider(image, settings.ai_max_image_side, settings.ml_max_pixels)
-    request, case = prompts.build_request(ml, jpeg, mime)
+    route = routing.decide(ml, settings)
+    evidence = routing.gather(route, jpeg, mime, settings, on_stage)      # the same re-encoded image bytes go to every visual provider
+    ev = evidence.internal()
+    request, case = prompts.build_request(ml, jpeg, mime, route.code, ev)
+    if on_stage:
+        on_stage("guidance")
     gate = _provider_gate(settings)
     if not gate.acquire(timeout=10):
         raise ProviderRateLimited("local provider concurrency limit reached", retry_after=10)
@@ -124,4 +132,5 @@ def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Setting
         ai = AIAnalysis.model_validate(response.data)
     except ValidationError as exc:
         raise ProviderBadResponse("answer did not match the schema: " + "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in exc.errors()[:4])) from exc
-    return ai, build_report(ml, ai), case
+    info = {"route": route.code, "plan_done": evidence.steps_done + ["guidance"], "specialists": ev}
+    return ai, build_report(ml, ai, route.code), case, info

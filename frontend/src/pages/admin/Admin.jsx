@@ -194,7 +194,7 @@ function SystemTab() {
         <Switch label="Maintenance mode" checked={f.maintenance_mode} onChange={(v) => setF({ ...f, maintenance_mode: v })} /></div>
       <Field label="Announcement banner" maxLength={300} value={f.announcement} onChange={(e) => setF({ ...f, announcement: e.target.value })} error={errs.announcement} hint="Shown to every signed-in user. Leave empty to hide." />
       <Field label="Max upload size (MB)" type="number" min={1} max={25} value={f.max_upload_mb} onChange={(e) => setF({ ...f, max_upload_mb: e.target.value })} error={errs.max_upload_mb} />
-      <Field label="Supported crops" value={f.supported_crops} onChange={(e) => setF({ ...f, supported_crops: e.target.value })} error={errs.supported_crops} hint="Comma-separated list." />
+      <Field label="Crop suggestions (legacy)" value={f.supported_crops} onChange={(e) => setF({ ...f, supported_crops: e.target.value })} error={errs.supported_crops} hint="Legacy list. It no longer limits what customers can analyze." />
       <div><Button type="submit" loading={busy}>Save settings</Button></div>
     </form>
   )

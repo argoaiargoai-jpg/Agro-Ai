@@ -25,11 +25,11 @@ function ModelCard() {
           <dt>Architecture</dt><dd>{arch || 'MobileNetV3-Small'}</dd>
           <dt>Input</dt><dd>{input ? `${input[1]} × ${input[2]}` : '224 × 224'}</dd>
           <dt>Inference</dt><dd>ONNX Runtime</dd>
-          <dt>Trained on</dt><dd>{info?.supported_crops ? `${info.supported_crops.length} crops` : '—'}</dd>
+          <dt>Guidance</dt><dd>Plant identification + AI</dd>
           <dt>Status</dt><dd className="ready">{info?.available ? <><span className="pulse-dot" /> Ready</> : 'Unavailable'}</dd>
         </dl>
       )}
-      <p className="fine">ML-powered image analysis, extended by agricultural AI guidance for a broader range of plants. Results are guidance, not a guarantee.</p>
+      <p className="fine">Multi-stage plant analysis: deep learning, plant identification and agricultural AI guidance. Results are guidance, not a guarantee.</p>
     </div>
   )
 }

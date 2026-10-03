@@ -148,7 +148,8 @@ def test_upload_too_large_cleans_up(client, user_auth, admin_auth, settings):
 
 
 def test_upload_validation_and_maintenance(client, user_auth, admin_auth):
-    assert upload(client, user_auth, crop_type="Unobtainium").status_code == 422
+    assert upload(client, user_auth, crop_type="Unobtainium").status_code == 201          # any plant name is allowed now (free text)
+    assert upload(client, user_auth, crop_type="x" * 61).status_code == 422
     assert upload(client, user_auth, source="drone").status_code == 422
     client.put(f"{V}/admin/settings", headers=admin_auth, json={"values": {"maintenance_mode": True}})
     r = upload(client, user_auth)
@@ -164,3 +165,23 @@ def test_path_traversal_filename_is_harmless(client, user_auth, settings):
     assert r.status_code == 201
     stored = [p for p in settings.upload_path.rglob("*") if p.is_file()]
     assert all(settings.upload_path in p.parents for p in stored)
+
+
+# ----------------------------------------------------------------------------- the plant/crop hint is free text (no 10-crop limit)
+def _upload(client, headers, crop):
+    from tests.conftest import _png
+    data = {"crop_type": crop} if crop is not None else {}
+    return client.post("/api/v1/analyses", headers=headers, files={"file": ("a.png", _png(), "image/png")}, data=data)
+
+
+def test_any_plant_name_is_accepted_not_only_the_model_crops(client, user_auth):
+    for name in ("Rose", "Mango", "  money   plant ", "Bell Pepper"):
+        r = _upload(client, user_auth, name)
+        assert r.status_code == 201, r.text
+    assert _upload(client, user_auth, "  money   plant ").json()["crop_type"] == "money plant"
+    assert _upload(client, user_auth, "   ").json()["crop_type"] is None and _upload(client, user_auth, None).json()["crop_type"] is None
+
+
+def test_overlong_or_control_character_plant_names_are_handled(client, user_auth):
+    assert _upload(client, user_auth, "x" * 61).status_code == 422
+    assert _upload(client, user_auth, "Ro\x00se\x07").json()["crop_type"] == "Rose"

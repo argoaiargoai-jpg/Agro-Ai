@@ -70,7 +70,8 @@ A test (`test_every_setting_is_documented_in_env_example`) fails if a setting is
 | Email / OTP | `EMAIL_BACKEND`, `SMTP_*`, `EMAIL_FROM`, `OTP_*`, `EXPOSE_DEV_OTP` |
 | Google sign-in | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
 | Admin bootstrap | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` |
-| AI guidance | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_BASE_URL`, `AI_TIMEOUT_SECONDS`, `AI_MAX_RETRIES`, `AI_MAX_CONCURRENCY`, `AI_MAX_IMAGE_SIDE`, `AI_USER_HOURLY_LIMIT` |
+| AI guidance | `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2` (legacy `GEMINI_API_KEY` = key 1), `GEMINI_MODEL`, `GEMINI_BASE_URL`, `AI_TIMEOUT_SECONDS`, `AI_MAX_RETRIES`, `AI_MAX_CONCURRENCY`, `AI_MAX_IMAGE_SIDE`, `AI_USER_HOURLY_LIMIT` |
+| Specialist providers (optional) | `PLANTNET_API_KEY`, `PLANTIX_API_KEY`, `KINDWISE_API_KEY`, `KINDWISE_PLANT_API_KEY`, `*_BASE_URL`, `SPECIALIST_TIMEOUT_SECONDS`, `ROUTE_HIGH_CONFIDENCE`, `ROUTE_MID_CONFIDENCE` |
 | ML | `ML_MODEL_DIR`, `ML_THREADS`, `ML_MAX_CONCURRENCY`, `ML_MAX_PIXELS` |
 | Uploads | `UPLOAD_DIR`, `MAX_UPLOAD_MB` |
 | Frontend (build time) | `VITE_API_URL` — **the only variable the browser ever sees; never put a secret in a `VITE_` variable** (the build refuses to run if you do) |
@@ -89,8 +90,8 @@ Latest verified run (groups: auth/OTP, Google OAuth, ML plumbing, AI workflow/Ge
 
 | Suite | Result |
 |---|---|
-| Backend (pytest) | **376 passed** |
-| Frontend unit tests (vitest) | **10 passed** |
+| Backend (pytest) | **490 passed** |
+| Frontend unit tests (vitest) | **13 passed** |
 | Frontend production build | **passes** |
 
 Tests never call Gemini (the AI is mocked; `tests/test_gemini_image_payload.py` checks that the real adapter sends the actual image bytes, MIME type and prompt in every ML case). Most tests use a tiny labelled fixture model (`tests/ml_fixture.py`); `tests/test_real_model.py` (22 tests) checks the installed real model, its exact thresholds, `/ml/info` and the four-case workflow.
@@ -105,6 +106,22 @@ alembic check                 # confirms migrations match the models
 ```
 `0002_ai_guidance_columns` only adds **nullable** columns to `analyses`, so pre-existing analyses keep working. Upgrade → downgrade → upgrade
 with data present is covered by `tests/test_migrations.py`. Production (`render.yaml`) runs `alembic upgrade head` on every start.
+
+## 5b. Analysis routing (our model first, then specialists, then Gemini)
+
+Every image goes through our own model first. Its confidence picks the path (thresholds `ROUTE_HIGH_CONFIDENCE` 0.80 / `ROUTE_MID_CONFIDENCE` 0.50):
+
+| Path | When | What runs before Gemini |
+|---|---|---|
+| A | DISEASE/HEALTHY, confidence >= 80% | nothing: image + our result go to Gemini |
+| B | DISEASE/HEALTHY, 50 to 79.99% | disease specialists (Plantix, Kindwise crop.health/plant.health) |
+| C | DISEASE/HEALTHY, below 50% | plant identification (Pl@ntNet), then disease specialists |
+| D | UNKNOWN, any confidence | plant identification, then disease specialists |
+| E | NO_PLANT | Gemini checks the image itself; plant identification too when our certainty is below 80% |
+
+Every visual provider receives the actual (re-encoded, metadata-free) image bytes. A specialist that has no key, or fails, is skipped and the path degrades; nothing is invented, and the progress steps shown to customers only list steps that really run (`result.plan`). Provider names never reach customers. With the calibrated thresholds our model only answers DISEASE/HEALTHY at >= 92%, so paths B and C are reachable only if those thresholds are changed; paths A, D and E carry the traffic today.
+
+**Two Gemini keys.** `GEMINI_API_KEY_1` / `_2` alternate request by request (1, 2, 1, 2...). The sequence is an atomic counter row in PostgreSQL (`counters`, one `INSERT .. ON CONFLICT DO UPDATE .. RETURNING`; migration `0003`), so it survives restarts and concurrent requests. If the chosen key fails (429, 5xx, timeout, bad key...) the same request is retried once on the other key without touching the counter (2 attempts at most). One key alone works; none keeps the ML-only behaviour.
 
 ## 6. AI guidance (Gemini)
 

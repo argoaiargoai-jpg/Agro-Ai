@@ -54,7 +54,9 @@ class Settings(BaseSettings):
     admin_name: str = "AGRO AI Admin"
 
     # --- External AI provider (backend-only secrets; NEVER sent to the frontend or stored in the DB) ---
-    gemini_api_key: SecretStr = SecretStr("")
+    gemini_api_key: SecretStr = SecretStr("")           # legacy single key: used as slot 1 when GEMINI_API_KEY_1 is not set
+    gemini_api_key_1: SecretStr = SecretStr("")         # two keys are used alternately (persistent DB counter) with automatic failover
+    gemini_api_key_2: SecretStr = SecretStr("")
     gemini_model: str = "gemini-3.8-flash"
     gemini_base_url: str = "https://generativelanguage.googleapis.com"
     ai_timeout_seconds: float = 45.0
@@ -62,6 +64,19 @@ class Settings(BaseSettings):
     ai_max_concurrency: int = 3             # simultaneous provider calls
     ai_max_image_side: int = 1568           # longest side sent to the provider (metadata is stripped by re-encoding)
     ai_user_hourly_limit: int = 30          # provider calls per user per hour
+
+    # --- Specialist plant/disease providers (all optional; each one that is not configured is simply skipped) ---
+    plantnet_api_key: SecretStr = SecretStr("")         # plant identification (my.plantnet.org)
+    plantnet_base_url: str = "https://my-api.plantnet.org"
+    plantix_api_key: SecretStr = SecretStr("")          # crop disease image analysis (Plantix partner API)
+    plantix_base_url: str = "https://api.plantix.net"
+    kindwise_api_key: SecretStr = SecretStr("")         # crop.health (crop disease identification)
+    kindwise_crop_base_url: str = "https://crop.kindwise.com"
+    kindwise_plant_api_key: SecretStr = SecretStr("")   # plant.health (non-crop plants); separate Kindwise product, optional
+    kindwise_plant_base_url: str = "https://plant.id"
+    specialist_timeout_seconds: float = 20.0
+    route_high_confidence: float = 0.80                 # >= this: our model's answer goes to Gemini together with the image
+    route_mid_confidence: float = 0.50                  # below this: plant identification first; between: disease specialists
 
     ml_model_dir: str = ""              # default: app/ml (model + metadata shipped with the app)
     ml_threads: int = 1                 # ONNX Runtime CPU threads (keep low on small free-tier machines)
@@ -114,7 +129,9 @@ class Settings(BaseSettings):
             if self.email_backend == "brevo" and not self.brevo_api_key.get_secret_value().strip():
                 w.append("EMAIL_BACKEND=brevo but BREVO_API_KEY is not set: verification emails cannot be sent.")
             if not self.gemini_configured:
-                w.append("GEMINI_API_KEY is not set: analyses will show only the basic model result.")
+                w.append("No Gemini key is set (GEMINI_API_KEY_1 / GEMINI_API_KEY_2): analyses will show only the basic model result.")
+            elif len(self.gemini_keys()) == 1:
+                w.append("Only one Gemini key is configured: requests are not alternated and there is no failover key (set GEMINI_API_KEY_1 and GEMINI_API_KEY_2).")
             if any("localhost" in o or "127.0.0.1" in o for o in self.cors_origin_list):
                 w.append("CORS_ORIGINS contains a localhost origin in production.")
         return w
@@ -135,9 +152,21 @@ class Settings(BaseSettings):
     def dev_otp_visible(self) -> bool:
         return self.expose_dev_otp and self.environment != "production"
 
+    def gemini_keys(self) -> list[tuple[int, str]]:
+        """Configured Gemini keys as (slot, key); slot 1 = GEMINI_API_KEY_1 (or the legacy GEMINI_API_KEY), slot 2 = GEMINI_API_KEY_2."""
+        k1 = self.gemini_api_key_1.get_secret_value().strip() or self.gemini_api_key.get_secret_value().strip()
+        k2 = self.gemini_api_key_2.get_secret_value().strip()
+        return [(slot, k) for slot, k in ((1, k1), (2, k2)) if k]
+
     @property
     def gemini_configured(self) -> bool:
-        return bool(self.gemini_api_key.get_secret_value().strip())
+        return bool(self.gemini_keys())
+
+    def secret_values(self) -> list[str]:
+        """Every provider secret, for log redaction. Never log or return these."""
+        fields = (self.gemini_api_key, self.gemini_api_key_1, self.gemini_api_key_2, self.plantnet_api_key, self.plantix_api_key,
+                  self.kindwise_api_key, self.kindwise_plant_api_key, self.brevo_api_key)
+        return [v for v in (f.get_secret_value().strip() for f in fields) if len(v) >= 6]
 
     @property
     def ml_path(self) -> Path:

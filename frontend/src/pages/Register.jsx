@@ -37,7 +37,7 @@ export default function Register() {
   }
 
   return (
-    <AuthShell title="Create your account" subtitle="Start monitoring crop health in minutes." footer={<>Already have an account? <Link to="/login">Sign in</Link></>}>
+    <AuthShell title="Create your account" subtitle="Start analyzing plant health in minutes." footer={<>Already have an account? <Link to="/login">Sign in</Link></>}>
       {!config.registration_enabled && <Alert tone="warn">New registrations are currently closed.</Alert>}
       {banner && <Alert tone="error">{banner}</Alert>}
       <form className="form" onSubmit={submit} noValidate>

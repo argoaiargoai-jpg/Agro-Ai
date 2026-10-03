@@ -17,7 +17,7 @@ from app.models import Analysis, AnalysisStatus, User
 from app.ai import registry
 from app.ai.base import ProviderError
 from app.core.security import utcnow
-from app.services import analysis_workflow, ml_service, settings_service
+from app.services import analysis_workflow, ml_service, routing, settings_service
 
 CHUNK = 1024 * 256
 log = logging.getLogger("agroai.analysis")
@@ -74,14 +74,22 @@ def validate_image_file(path: Path, expected_content_type: str, max_pixels: int)
         raise AppError(422, "invalid_image", "We couldn't read that image. It may be corrupt or incomplete.", {"file": "Unreadable image."}) from exc
 
 
+def clean_crop_name(value: str | None) -> str | None:
+    """The plant/crop hint is free text now (any plant may be analysed): trimmed, single-spaced, printable, at most 60 characters."""
+    if not value:
+        return None
+    text = re.sub(r"\s+", " ", "".join(ch for ch in value if ch.isprintable() or ch.isspace())).strip()
+    if len(text) > 60:
+        raise AppError(422, "validation_error", "That plant name is too long.", {"crop_type": "Use at most 60 characters."})
+    return text or None
+
+
 def create(db: Session, user: User, file: UploadFile, crop_type: str | None, source: str, notes: str | None) -> Analysis:
     if settings_service.get_value(db, "maintenance_mode"):
         raise AppError(503, "maintenance", "AGRO AI is in maintenance mode. Please try again later.")
     if source not in ("upload", "camera"):
         raise AppError(422, "validation_error", "Invalid source.", {"source": "Must be upload or camera."})
-    crops = settings_service.get_value(db, "supported_crops")
-    if crop_type and crop_type not in crops:
-        raise AppError(422, "validation_error", "Unsupported crop.", {"crop_type": "Choose a supported crop."})
+    crop_type = clean_crop_name(crop_type)
     if notes and len(notes) > 1000:
         raise AppError(422, "validation_error", "Notes too long.", {"notes": "Max 1000 characters."})
 
@@ -255,20 +263,31 @@ def _claim(db: Session, a: Analysis) -> None:
     db.refresh(a)
 
 
-def _result(ml, ai=None, final=None, ai_error=None, stage="ml_done", case=None) -> dict:
-    return {"ml": ml, "ai": ai, "final": final, "ai_error": ai_error, "stage": stage,
-            "prompt_version": analysis_workflow.prompts.PROMPT_VERSION, "ai_case": case}
+def _result(ml, ai=None, final=None, ai_error=None, stage="ml_done", case=None, plan=None, info=None) -> dict:
+    """`plan` = customer-safe step names ("identify" / "disease" / "guidance") that will run or did run. `info` (internal, admin-only):
+    route code and specialist evidence/provider status."""
+    out = {"ml": ml, "ai": ai, "final": final, "ai_error": ai_error, "stage": stage, "plan": plan or ["guidance"],
+           "prompt_version": analysis_workflow.prompts.PROMPT_VERSION, "ai_case": case}
+    if info:
+        out["route"], out["specialists"] = info.get("route"), info.get("specialists")
+    return out
+
+
+def _planned(ml: dict) -> list[str]:
+    s = get_settings()
+    return routing.planned_steps(routing.decide(ml, s), s)
 
 
 def _ml_only(db: Session, a: Analysis, ml: dict, ai_status: str) -> Analysis:
-    a.result = _result(ml, ai_error={"code": ai_status, "message": AI_MESSAGES[ai_status], "retryable": False}, stage="ml_only")
+    a.result = _result(ml, ai_error={"code": ai_status, "message": AI_MESSAGES[ai_status], "retryable": False}, stage="ml_only", plan=[])
     a.status, a.ai_status, a.ai_error_code = AnalysisStatus.completed.value, ai_status, None
     db.commit()
     return a
 
 
 def _guidance_failed(db: Session, a: Analysis, ml: dict, ai_status: str, message: str, retryable: bool, retry_after: int | None, code: str) -> Analysis:
-    a.result = _result(ml, ai_error={"code": ai_status, "message": message, "retryable": retryable, "retry_after": retry_after}, stage="guidance_failed")
+    a.result = _result(ml, ai_error={"code": ai_status, "message": message, "retryable": retryable, "retry_after": retry_after}, stage="guidance_failed",
+                       plan=(a.result or {}).get("plan"))
     a.status, a.ai_status, a.ai_error_code = AnalysisStatus.partial.value, ai_status, code
     db.commit()
     return a
@@ -306,12 +325,18 @@ def _ai_stage(db: Session, user: User, a: Analysis, ml: dict, image: bytes, forc
         return _guidance_failed(db, a, ml, "user_limit", f"You've reached the limit of {settings.ai_user_hourly_limit} guidance requests per hour. Please try again later.", True, wait, "user_hourly_limit")
     a.ai_attempted_at = now
     db.commit()
+    a.result = _result(ml, plan=_planned(ml))                                    # (re)announce what will really run, for a retry as well
+    db.commit()
+
+    def on_stage(name: str) -> None:                                             # committed so the UI follows the REAL backend step
+        a.result = {**(a.result or {}), "stage": name}
+        db.commit()
     try:
-        ai, report, case = analysis_workflow.run_guidance(provider, ml, image, settings)
+        ai, report, case, info = analysis_workflow.run_guidance(provider, ml, image, settings, on_stage)
     except ProviderError as exc:
         log.warning("analysis %s: AI guidance failed (%s): %s", a.id, exc.ai_status, exc.detail)
         return _guidance_failed(db, a, ml, exc.ai_status, exc.user_message, exc.retryable, exc.retry_after, type(exc).__name__)
-    a.result = _result(ml, ai=ai.model_dump(), final=report.model_dump(), stage="complete", case=case)
+    a.result = _result(ml, ai=ai.model_dump(), final=report.model_dump(), stage="complete", case=case, plan=info["plan_done"], info=info)
     a.status, a.ai_status, a.ai_error_code, a.ai_completed_at = AnalysisStatus.completed.value, "completed", None, utcnow()
     db.commit()
     return a
@@ -333,7 +358,7 @@ def run_analysis(db: Session, user: User, analysis_id: uuid.UUID, force: bool = 
             ml = prior_ml
         else:
             ml = service.predict(data)
-            a.result = _result(ml)                              # stage 1 is committed first, so the UI can show a REAL stage change
+            a.result = _result(ml, plan=_planned(ml))           # stage 1 is committed first, so the UI can show a REAL stage change
             a.confidence, a.ml_completed_at = ml["confidence"], utcnow()
             a.ai_status = a.ai_error_code = a.ai_completed_at = None      # ai_attempted_at is kept: the cooldown must see earlier attempts
             db.commit()

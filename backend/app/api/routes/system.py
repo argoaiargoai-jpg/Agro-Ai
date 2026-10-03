@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -18,7 +20,8 @@ def health(db: Session = Depends(get_db)):
     except Exception as exc:  # noqa: BLE001
         raise AppError(503, "db_unavailable", "Database is not reachable.") from exc
     return {"status": "ok", "app": s.app_name, "environment": s.environment, "database": "ok",
-            "ml_model": "installed" if (s.ml_path / "agro_model.onnx").exists() else "missing"}
+            "ml_model": "installed" if (s.ml_path / "agro_model.onnx").exists() else "missing",
+            "commit": (os.environ.get("RENDER_GIT_COMMIT") or "")[:7] or None}          # which build is running (Render sets it); not a secret
 
 
 @router.get("/config/public")

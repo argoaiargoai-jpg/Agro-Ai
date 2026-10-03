@@ -16,7 +16,7 @@ from tests.conftest import register_and_verify
 V = "/api/v1"
 PROD = dict(environment="production", secret_key="k" * 48, cookie_secure=True, cookie_samesite="none", frontend_url="https://app.netlify.app",
             backend_url="https://api.onrender.com", cors_origins="https://app.netlify.app", database_url="postgres://u:p@db.example.com/agro",
-            admin_password="Str0ng-unique-pass9", email_backend="smtp", smtp_host="smtp.example.com", gemini_api_key="x")
+            admin_password="Str0ng-unique-pass9", email_backend="smtp", smtp_host="smtp.example.com", gemini_api_key_1="x" * 12, gemini_api_key_2="y" * 12)
 
 
 def cfg(**over) -> Settings:
@@ -70,7 +70,7 @@ def test_database_url_and_origin_normalisation():
 
 
 def test_startup_warnings_flag_risky_but_allowed_production_settings():
-    w = cfg(email_backend="console", gemini_api_key="", cors_origins="https://a.example,https://localhost:3000").startup_warnings()
+    w = cfg(email_backend="console", gemini_api_key_1="", gemini_api_key_2="", cors_origins="https://a.example,https://localhost:3000").startup_warnings()
     joined = " ".join(w)
     assert "EMAIL_BACKEND" in joined and "GEMINI_API_KEY" in joined and "localhost" in joined
 
@@ -91,7 +91,7 @@ def test_every_setting_is_documented_in_env_example():
     internal = {"APP_NAME", "API_PREFIX"}
     missing = {n.upper() for n in Settings.model_fields} - documented - internal
     assert not missing, f"undocumented settings: {sorted(missing)}"
-    assert not re.search(r"(?im)^(SECRET_KEY|GEMINI_API_KEY|ADMIN_PASSWORD|SMTP_PASSWORD|BREVO_API_KEY|GOOGLE_CLIENT_SECRET)=\S", text), "an example file must not carry values for secrets"
+    assert not re.search(r"(?im)^(SECRET_KEY|GEMINI_API_KEY|ADMIN_PASSWORD|SMTP_PASSWORD|BREVO_API_KEY|GOOGLE_CLIENT_SECRET|GEMINI_API_KEY_[12]|PLANTNET_API_KEY|PLANTIX_API_KEY|KINDWISE_API_KEY|KINDWISE_PLANT_API_KEY)=\S", text), "an example file must not carry values for secrets"
 
 
 def test_frontend_env_example_documents_every_variable_the_frontend_reads():
@@ -186,7 +186,8 @@ def test_security_headers_on_every_response(client):
 def test_health_reports_status_without_leaking_configuration(client):
     r = client.get(f"{V}/health")
     b = r.json()
-    assert r.status_code == 200 and set(b) == {"status", "app", "environment", "database", "ml_model"} and b["ml_model"] in ("installed", "missing")
+    assert r.status_code == 200 and set(b) == {"status", "app", "environment", "database", "ml_model", "commit"} and b["ml_model"] in ("installed", "missing")
+    assert b["commit"] is None or re.fullmatch(r"[0-9a-f]{7}", b["commit"])            # the build id only: no configuration, URL or secret
 
 
 # ------------------------------------------------------------------ error handling: nothing internal reaches the customer

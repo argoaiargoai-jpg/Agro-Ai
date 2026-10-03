@@ -23,7 +23,7 @@ class SecretRedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         from app.ai.safety import redact
         msg = record.getMessage()
-        red = redact(msg, [get_settings().gemini_api_key.get_secret_value()])
+        red = redact(msg, get_settings().secret_values())
         if red != msg:
             record.msg, record.args = red, ()
         return True
