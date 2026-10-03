@@ -1,0 +1,297 @@
+{
+ "temperature": 0.5581487417221069,
+ "t_non_plant": 0.44499999999999995,
+ "t_confidence": 0.92,
+ "method": {
+  "temperature": "LBFGS on validation NLL (PlantVillage+PlantDoc known)",
+  "t_non_plant": "lowest threshold with <=1% false NO_PLANT on validation plant images (both domains)",
+  "t_confidence": "max Youden J on validation: domain-balanced known-correct rate minus novel-unknown (Raspberry) accepted rate"
+ },
+ "calibration": {
+  "ece_before": 0.12806381800998956,
+  "ece_after": 0.004724480989868342,
+  "temperature": 0.5581487417221069
+ },
+ "validation_sweep": [
+  {
+   "t": 0.2,
+   "known_lab": 0.9776674937965261,
+   "known_field": 0.6064981949458483,
+   "unknown_wrongly_accepted": 0.9925373134328358,
+   "youden_J": -0.20045446906164865
+  },
+  {
+   "t": 0.22,
+   "known_lab": 0.9776674937965261,
+   "known_field": 0.6064981949458483,
+   "unknown_wrongly_accepted": 0.9776119402985075,
+   "youden_J": -0.18552909592732036
+  },
+  {
+   "t": 0.24,
+   "known_lab": 0.9776674937965261,
+   "known_field": 0.6064981949458483,
+   "unknown_wrongly_accepted": 0.9601990049751243,
+   "youden_J": -0.1681161606039372
+  },
+  {
+   "t": 0.26,
+   "known_lab": 0.9775124069478908,
+   "known_field": 0.6064981949458483,
+   "unknown_wrongly_accepted": 0.9378109452736318,
+   "youden_J": -0.14580564432676235
+  },
+  {
+   "t": 0.28,
+   "known_lab": 0.9775124069478908,
+   "known_field": 0.6064981949458483,
+   "unknown_wrongly_accepted": 0.9079601990049752,
+   "youden_J": -0.11595489805810566
+  },
+  {
+   "t": 0.3,
+   "known_lab": 0.9775124069478908,
+   "known_field": 0.6064981949458483,
+   "unknown_wrongly_accepted": 0.8905472636815921,
+   "youden_J": -0.0985419627347226
+  },
+  {
+   "t": 0.32,
+   "known_lab": 0.9773573200992556,
+   "known_field": 0.6028880866425993,
+   "unknown_wrongly_accepted": 0.8756218905472637,
+   "youden_J": -0.0854991871763362
+  },
+  {
+   "t": 0.34,
+   "known_lab": 0.9773573200992556,
+   "known_field": 0.6028880866425993,
+   "unknown_wrongly_accepted": 0.8283582089552238,
+   "youden_J": -0.038235505584296337
+  },
+  {
+   "t": 0.36,
+   "known_lab": 0.9773573200992556,
+   "known_field": 0.5992779783393501,
+   "unknown_wrongly_accepted": 0.7960199004975125,
+   "youden_J": -0.00770225127820956
+  },
+  {
+   "t": 0.38,
+   "known_lab": 0.9772022332506204,
+   "known_field": 0.5992779783393501,
+   "unknown_wrongly_accepted": 0.7686567164179104,
+   "youden_J": 0.019583389377074822
+  },
+  {
+   "t": 0.4,
+   "known_lab": 0.9770471464019851,
+   "known_field": 0.5884476534296029,
+   "unknown_wrongly_accepted": 0.736318407960199,
+   "youden_J": 0.04642899195559502
+  },
+  {
+   "t": 0.42,
+   "known_lab": 0.9767369727047146,
+   "known_field": 0.5848375451263538,
+   "unknown_wrongly_accepted": 0.6990049751243781,
+   "youden_J": 0.08178228379115615
+  },
+  {
+   "t": 0.44,
+   "known_lab": 0.9762717121588089,
+   "known_field": 0.5776173285198556,
+   "unknown_wrongly_accepted": 0.6616915422885572,
+   "youden_J": 0.11525297805077506
+  },
+  {
+   "t": 0.46,
+   "known_lab": 0.9754962779156328,
+   "known_field": 0.5595667870036101,
+   "unknown_wrongly_accepted": 0.6293532338308457,
+   "youden_J": 0.13817829862877573
+  },
+  {
+   "t": 0.48,
+   "known_lab": 0.9747208436724566,
+   "known_field": 0.5451263537906137,
+   "unknown_wrongly_accepted": 0.582089552238806,
+   "youden_J": 0.17783404649272916
+  },
+  {
+   "t": 0.5,
+   "known_lab": 0.9736352357320099,
+   "known_field": 0.5342960288808665,
+   "unknown_wrongly_accepted": 0.5472636815920398,
+   "youden_J": 0.20670195071439845
+  },
+  {
+   "t": 0.52,
+   "known_lab": 0.9725496277915633,
+   "known_field": 0.516245487364621,
+   "unknown_wrongly_accepted": 0.5074626865671642,
+   "youden_J": 0.23693487101092792
+  },
+  {
+   "t": 0.54,
+   "known_lab": 0.97037841191067,
+   "known_field": 0.5126353790613718,
+   "unknown_wrongly_accepted": 0.46766169154228854,
+   "youden_J": 0.27384520394373235
+  },
+  {
+   "t": 0.56,
+   "known_lab": 0.9699131513647643,
+   "known_field": 0.5090252707581228,
+   "unknown_wrongly_accepted": 0.43532338308457713,
+   "youden_J": 0.30414582797686646
+  },
+  {
+   "t": 0.58,
+   "known_lab": 0.9691377171215881,
+   "known_field": 0.4981949458483754,
+   "unknown_wrongly_accepted": 0.40049751243781095,
+   "youden_J": 0.3331688190471709
+  },
+  {
+   "t": 0.6,
+   "known_lab": 0.9680521091811415,
+   "known_field": 0.49097472924187724,
+   "unknown_wrongly_accepted": 0.3756218905472637,
+   "youden_J": 0.35389152866424567
+  },
+  {
+   "t": 0.62,
+   "known_lab": 0.9660359801488834,
+   "known_field": 0.48375451263537905,
+   "unknown_wrongly_accepted": 0.34328358208955223,
+   "youden_J": 0.381611664302579
+  },
+  {
+   "t": 0.64,
+   "known_lab": 0.9646401985111662,
+   "known_field": 0.4729241877256318,
+   "unknown_wrongly_accepted": 0.32338308457711445,
+   "youden_J": 0.3953991085412845
+  },
+  {
+   "t": 0.66,
+   "known_lab": 0.9626240694789082,
+   "known_field": 0.4620938628158845,
+   "unknown_wrongly_accepted": 0.3009950248756219,
+   "youden_J": 0.41136394127177445
+  },
+  {
+   "t": 0.68,
+   "known_lab": 0.9613833746898263,
+   "known_field": 0.44404332129963897,
+   "unknown_wrongly_accepted": 0.291044776119403,
+   "youden_J": 0.4116685718753296
+  },
+  {
+   "t": 0.7,
+   "known_lab": 0.9595223325062034,
+   "known_field": 0.4404332129963899,
+   "unknown_wrongly_accepted": 0.263681592039801,
+   "youden_J": 0.4362961807114957
+  },
+  {
+   "t": 0.72,
+   "known_lab": 0.9578163771712159,
+   "known_field": 0.4259927797833935,
+   "unknown_wrongly_accepted": 0.2562189054726368,
+   "youden_J": 0.4356856730046679
+  },
+  {
+   "t": 0.74,
+   "known_lab": 0.9553349875930521,
+   "known_field": 0.4151624548736462,
+   "unknown_wrongly_accepted": 0.236318407960199,
+   "youden_J": 0.44893031327315014
+  },
+  {
+   "t": 0.76,
+   "known_lab": 0.9528535980148883,
+   "known_field": 0.4007220216606498,
+   "unknown_wrongly_accepted": 0.22139303482587064,
+   "youden_J": 0.45539477501189846
+  },
+  {
+   "t": 0.78,
+   "known_lab": 0.9503722084367245,
+   "known_field": 0.37906137184115524,
+   "unknown_wrongly_accepted": 0.20149253731343283,
+   "youden_J": 0.46322425282550705
+  },
+  {
+   "t": 0.8,
+   "known_lab": 0.9466501240694789,
+   "known_field": 0.37906137184115524,
+   "unknown_wrongly_accepted": 0.1890547263681592,
+   "youden_J": 0.47380102158715787
+  },
+  {
+   "t": 0.82,
+   "known_lab": 0.9432382133995038,
+   "known_field": 0.36823104693140796,
+   "unknown_wrongly_accepted": 0.17661691542288557,
+   "youden_J": 0.47911771474257026
+  },
+  {
+   "t": 0.84,
+   "known_lab": 0.9387406947890818,
+   "known_field": 0.35018050541516244,
+   "unknown_wrongly_accepted": 0.14925373134328357,
+   "youden_J": 0.49520686875883857
+  },
+  {
+   "t": 0.86,
+   "known_lab": 0.9333126550868487,
+   "known_field": 0.33935018050541516,
+   "unknown_wrongly_accepted": 0.13681592039800994,
+   "youden_J": 0.49951549739812195
+  },
+  {
+   "t": 0.88,
+   "known_lab": 0.9277295285359801,
+   "known_field": 0.33212996389891697,
+   "unknown_wrongly_accepted": 0.11691542288557213,
+   "youden_J": 0.5130143233318765
+  },
+  {
+   "t": 0.9,
+   "known_lab": 0.9174937965260546,
+   "known_field": 0.3249097472924188,
+   "unknown_wrongly_accepted": 0.1044776119402985,
+   "youden_J": 0.5167241599689382
+  },
+  {
+   "t": 0.92,
+   "known_lab": 0.9066377171215881,
+   "known_field": 0.30685920577617326,
+   "unknown_wrongly_accepted": 0.0845771144278607,
+   "youden_J": 0.5221713470210201
+  },
+  {
+   "t": 0.94,
+   "known_lab": 0.8912841191066998,
+   "known_field": 0.2815884476534296,
+   "unknown_wrongly_accepted": 0.07213930348258707,
+   "youden_J": 0.5142969798974777
+  },
+  {
+   "t": 0.96,
+   "known_lab": 0.8661600496277916,
+   "known_field": 0.24548736462093862,
+   "unknown_wrongly_accepted": 0.03980099502487562,
+   "youden_J": 0.5160227120994895
+  },
+  {
+   "t": 0.98,
+   "known_lab": 0.813120347394541,
+   "known_field": 0.19133574007220217,
+   "unknown_wrongly_accepted": 0.01990049751243781,
+   "youden_J": 0.48232754622093377
+  }
+ ]
+}

@@ -1,0 +1,16 @@
+# Runtime dependencies only (what Render installs). Tests/tools live in requirements-dev.txt.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy>=2.0
+alembic>=1.13              # runs migrations at start-up
+pydantic>=2.7
+pydantic-settings>=2.3
+pyjwt>=2.8
+bcrypt>=4.1
+email-validator>=2.1
+python-multipart>=0.0.9
+httpx>=0.27                # Gemini + Google sign-in calls
+psycopg[binary]>=3.1       # PostgreSQL driver (production database)
+onnxruntime>=1.17          # inference engine for our model (loaded lazily on first analysis)
+numpy>=1.26
+pillow>=10.2

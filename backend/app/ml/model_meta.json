@@ -1,0 +1,296 @@
+{
+ "model": "MobileNetV3-Small (ImageNet transfer learning), 224x224 input",
+ "run": "colab",
+ "trained_epoch": 14,
+ "input": {
+  "size": 224,
+  "resize": 256,
+  "mean": [
+   0.485,
+   0.456,
+   0.406
+  ],
+  "std": [
+   0.229,
+   0.224,
+   0.225
+  ],
+  "layout": "NCHW float32"
+ },
+ "classes": [
+  {
+   "id": "Apple___Apple_scab",
+   "special": null,
+   "crop": "Apple",
+   "condition": "Apple Scab",
+   "healthy": false
+  },
+  {
+   "id": "Apple___Black_rot",
+   "special": null,
+   "crop": "Apple",
+   "condition": "Black Rot",
+   "healthy": false
+  },
+  {
+   "id": "Apple___Cedar_apple_rust",
+   "special": null,
+   "crop": "Apple",
+   "condition": "Cedar Apple Rust",
+   "healthy": false
+  },
+  {
+   "id": "Apple___healthy",
+   "special": null,
+   "crop": "Apple",
+   "condition": null,
+   "healthy": true
+  },
+  {
+   "id": "Cherry_(including_sour)___Powdery_mildew",
+   "special": null,
+   "crop": "Cherry",
+   "condition": "Powdery Mildew",
+   "healthy": false
+  },
+  {
+   "id": "Cherry_(including_sour)___healthy",
+   "special": null,
+   "crop": "Cherry",
+   "condition": null,
+   "healthy": true
+  },
+  {
+   "id": "Corn_(maize)___Cercospora_leaf_spot Gray_leaf_spot",
+   "special": null,
+   "crop": "Corn",
+   "condition": "Gray Leaf Spot",
+   "healthy": false
+  },
+  {
+   "id": "Corn_(maize)___Common_rust_",
+   "special": null,
+   "crop": "Corn",
+   "condition": "Common Rust",
+   "healthy": false
+  },
+  {
+   "id": "Corn_(maize)___Northern_Leaf_Blight",
+   "special": null,
+   "crop": "Corn",
+   "condition": "Northern Leaf Blight",
+   "healthy": false
+  },
+  {
+   "id": "Corn_(maize)___healthy",
+   "special": null,
+   "crop": "Corn",
+   "condition": null,
+   "healthy": true
+  },
+  {
+   "id": "Grape___Black_rot",
+   "special": null,
+   "crop": "Grape",
+   "condition": "Black Rot",
+   "healthy": false
+  },
+  {
+   "id": "Grape___Esca_(Black_Measles)",
+   "special": null,
+   "crop": "Grape",
+   "condition": "Esca (Black Measles)",
+   "healthy": false
+  },
+  {
+   "id": "Grape___Leaf_blight_(Isariopsis_Leaf_Spot)",
+   "special": null,
+   "crop": "Grape",
+   "condition": "Leaf Blight (Isariopsis Leaf Spot)",
+   "healthy": false
+  },
+  {
+   "id": "Grape___healthy",
+   "special": null,
+   "crop": "Grape",
+   "condition": null,
+   "healthy": true
+  },
+  {
+   "id": "Peach___Bacterial_spot",
+   "special": null,
+   "crop": "Peach",
+   "condition": "Bacterial Spot",
+   "healthy": false
+  },
+  {
+   "id": "Peach___healthy",
+   "special": null,
+   "crop": "Peach",
+   "condition": null,
+   "healthy": true
+  },
+  {
+   "id": "Pepper,_bell___Bacterial_spot",
+   "special": null,
+   "crop": "Bell Pepper",
+   "condition": "Bacterial Spot",
+   "healthy": false
+  },
+  {
+   "id": "Pepper,_bell___healthy",
+   "special": null,
+   "crop": "Bell Pepper",
+   "condition": null,
+   "healthy": true
+  },
+  {
+   "id": "Potato___Early_blight",
+   "special": null,
+   "crop": "Potato",
+   "condition": "Early Blight",
+   "healthy": false
+  },
+  {
+   "id": "Potato___Late_blight",
+   "special": null,
+   "crop": "Potato",
+   "condition": "Late Blight",
+   "healthy": false
+  },
+  {
+   "id": "Potato___healthy",
+   "special": null,
+   "crop": "Potato",
+   "condition": null,
+   "healthy": true
+  },
+  {
+   "id": "Soybean___healthy",
+   "special": null,
+   "crop": "Soybean",
+   "condition": null,
+   "healthy": true
+  },
+  {
+   "id": "Strawberry___Leaf_scorch",
+   "special": null,
+   "crop": "Strawberry",
+   "condition": "Leaf Scorch",
+   "healthy": false
+  },
+  {
+   "id": "Strawberry___healthy",
+   "special": null,
+   "crop": "Strawberry",
+   "condition": null,
+   "healthy": true
+  },
+  {
+   "id": "Tomato___Bacterial_spot",
+   "special": null,
+   "crop": "Tomato",
+   "condition": "Bacterial Spot",
+   "healthy": false
+  },
+  {
+   "id": "Tomato___Early_blight",
+   "special": null,
+   "crop": "Tomato",
+   "condition": "Early Blight",
+   "healthy": false
+  },
+  {
+   "id": "Tomato___Late_blight",
+   "special": null,
+   "crop": "Tomato",
+   "condition": "Late Blight",
+   "healthy": false
+  },
+  {
+   "id": "Tomato___Leaf_Mold",
+   "special": null,
+   "crop": "Tomato",
+   "condition": "Leaf Mold",
+   "healthy": false
+  },
+  {
+   "id": "Tomato___Septoria_leaf_spot",
+   "special": null,
+   "crop": "Tomato",
+   "condition": "Septoria Leaf Spot",
+   "healthy": false
+  },
+  {
+   "id": "Tomato___Spider_mites Two-spotted_spider_mite",
+   "special": null,
+   "crop": "Tomato",
+   "condition": "Spider Mites (Two-spotted)",
+   "healthy": false
+  },
+  {
+   "id": "Tomato___Target_Spot",
+   "special": null,
+   "crop": "Tomato",
+   "condition": "Target Spot",
+   "healthy": false
+  },
+  {
+   "id": "Tomato___Tomato_Yellow_Leaf_Curl_Virus",
+   "special": null,
+   "crop": "Tomato",
+   "condition": "Yellow Leaf Curl Virus",
+   "healthy": false
+  },
+  {
+   "id": "Tomato___Tomato_mosaic_virus",
+   "special": null,
+   "crop": "Tomato",
+   "condition": "Mosaic Virus",
+   "healthy": false
+  },
+  {
+   "id": "Tomato___healthy",
+   "special": null,
+   "crop": "Tomato",
+   "condition": null,
+   "healthy": true
+  },
+  {
+   "id": "__unknown_plant__",
+   "special": "unknown",
+   "crop": null,
+   "condition": null,
+   "healthy": false
+  },
+  {
+   "id": "__non_plant__",
+   "special": "non_plant",
+   "crop": null,
+   "condition": null,
+   "healthy": false
+  }
+ ],
+ "supported_crops": [
+  "Apple",
+  "Bell Pepper",
+  "Cherry",
+  "Corn",
+  "Grape",
+  "Peach",
+  "Potato",
+  "Soybean",
+  "Strawberry",
+  "Tomato"
+ ],
+ "decision": {
+  "temperature": 0.5581487417221069,
+  "t_non_plant": 0.44499999999999995,
+  "t_confidence": 0.92
+ },
+ "decision_method": {
+  "temperature": "LBFGS on validation NLL (PlantVillage+PlantDoc known)",
+  "t_non_plant": "lowest threshold with <=1% false NO_PLANT on validation plant images (both domains)",
+  "t_confidence": "max Youden J on validation: domain-balanced known-correct rate minus novel-unknown (Raspberry) accepted rate"
+ }
+}

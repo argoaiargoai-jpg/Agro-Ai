@@ -1,0 +1,78 @@
+# ---------------- Secrets (never commit) ----------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ---------------- Dependencies / virtual environments ----------------
+node_modules/
+.venv/
+venv/
+env/
+.venv-train/
+**/.venv*/
+
+# ---------------- Python caches ----------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------------- Build output ----------------
+dist/
+build/
+.vite/
+.netlify/
+*.egg-info/
+
+# ---------------- Logs ----------------
+logs/
+*.log
+npm-debug.log*
+
+# ---------------- Local databases and user uploads ----------------
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+backend/uploads/
+uploads/
+
+# ---------------- ML: datasets, training artefacts, Colab leftovers ----------------
+backend/ml/data/
+backend/ml/runs/
+backend/ml/agroai_ml_bundle.zip
+backend/ml/reports/*/export/
+*.pt
+*.pth
+*.ckpt
+*.npz
+*.npy
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+colab_temp/
+sample_data/
+# NOTE: backend/app/ml/agro_model.onnx and model_meta.json are deliberately NOT ignored:
+# the deployed backend needs them at runtime (they are small, ~6 MB).
+
+# ---------------- OS / editor ----------------
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# ---------------- Temporary / large files ----------------
+*.tmp
+*.temp
+*.bak
+*.zip
+!backend/ml/notebooks/*.zip
+backend/:memory:.ses
+backend/:memory:.ses
+backend/ml/reports/

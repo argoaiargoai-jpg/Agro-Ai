@@ -1,0 +1,3 @@
+-r requirements.txt
+pytest>=8.0
+onnx>=1.15                 # only to build the tiny plumbing-test model in tests/ml_fixture.py

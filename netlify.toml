@@ -1,0 +1,37 @@
+# Netlify (frontend only). The repo root is the monorepo, the React app lives in /frontend.
+# Set VITE_API_URL in Netlify > Site configuration > Environment variables (see frontend/.env.example). NEVER put a secret there.
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "dist"            # relative to `base`  ->  frontend/dist
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Single-page app: every path (e.g. refreshing /analysis/123 or /admin) is served by index.html and handled by React Router.
+# Real files (assets, favicon) are still served as-is because `force` is not set.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Optional same-origin proxy (alternative to cross-site cookies; helps Safari). Uncomment and put your Render URL:
+# [[redirects]]
+#   from = "/api/*"
+#   to = "https://YOUR-SERVICE.onrender.com/api/:splat"
+#   status = 200
+#   force = true
+# (then leave VITE_API_URL empty and set COOKIE_SAMESITE=lax on the backend). Note: Netlify proxies time out after ~26 s.
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(self), microphone=(), geolocation=(), payment=()"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

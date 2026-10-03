@@ -1,0 +1,14 @@
+# Training / evaluation environment (NOT needed on the server). Python 3.10-3.14.
+torch>=2.2
+torchvision>=0.17
+numpy
+pandas
+pillow
+scikit-learn
+matplotlib
+onnx
+onnxruntime
+onnxscript
+remotezip
+tqdm
+certifi
