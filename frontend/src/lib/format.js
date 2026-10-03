@@ -16,10 +16,10 @@ export const STATUS = {
 
 export const OAUTH_ERRORS = {
   oauth_cancelled: 'Google sign-in was cancelled.',
-  oauth_state_invalid: 'Your sign-in link expired. Please try again.',
-  oauth_exchange_failed: 'Google rejected the sign-in request. Please try again.',
+  oauth_state_invalid: "Google sign-in couldn't be completed. Please try again.",
+  oauth_exchange_failed: "Google sign-in couldn't be completed. Please try again.",
   oauth_email_unverified: 'Your Google email address is not verified.',
-  oauth_unreachable: 'We could not reach Google. Please try again.',
+  oauth_unreachable: "Google sign-in couldn't be completed. Please try again.",
   oauth_conflict: 'This email is linked to a different Google account.',
   account_disabled: 'This account has been disabled.',
   registration_disabled: 'New registrations are currently closed.',

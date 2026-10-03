@@ -69,12 +69,13 @@ def decode_token(token: str, expected_type: str) -> dict:
     return payload
 
 
-def create_state_token() -> str:
-    """Signed, short-lived OAuth `state` (CSRF protection)."""
+def create_state_token(nonce: str | None = None) -> str:
+    """Signed, short-lived OAuth `state` (CSRF protection). `nonce` is also kept in an HttpOnly cookie in the user's browser,
+    so a state obtained by someone else cannot be replayed into another user's browser (login CSRF)."""
     s = get_settings()
     now = utcnow()
     return jwt.encode(
-        {"type": "oauth_state", "n": secrets.token_urlsafe(8), "iat": now, "exp": now + timedelta(minutes=10)},
+        {"type": "oauth_state", "n": nonce or secrets.token_urlsafe(16), "iat": now, "exp": now + timedelta(minutes=10)},
         s.secret_key,
         algorithm="HS256",
     )

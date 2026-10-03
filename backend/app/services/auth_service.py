@@ -1,5 +1,6 @@
 import hmac
 import logging
+import secrets
 import uuid
 from datetime import timedelta
 from urllib.parse import urlencode
@@ -24,6 +25,7 @@ log = logging.getLogger("agroai.auth")
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+GOOGLE_ISSUERS = {"https://accounts.google.com", "accounts.google.com"}
 REFRESH_REUSE_GRACE_SECONDS = 10
 
 
@@ -265,30 +267,52 @@ def change_password(db: Session, user: User, current: str | None, new: str) -> N
 
 
 # ------------------------------------------------------------ Google
-def google_authorization_url() -> str:
+def google_authorization_url() -> tuple[str, str]:
+    """Returns (url, nonce). The nonce must be stored in a browser cookie and presented again at the callback."""
     s = get_settings()
     if not s.google_enabled:
         raise AppError(503, "google_not_configured", "Google sign-in is not configured on this server.")
+    nonce = secrets.token_urlsafe(16)
     params = {
         "client_id": s.google_client_id,
         "redirect_uri": s.google_redirect_uri,
         "response_type": "code",
         "scope": "openid email profile",
-        "state": security.create_state_token(),
+        "state": security.create_state_token(nonce),
         "access_type": "online",
         "prompt": "select_account",
     }
-    return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+    return f"{GOOGLE_AUTH_URL}?{urlencode(params)}", nonce
 
 
-def google_complete(db: Session, code: str, state: str) -> User:
+def _check_id_token(id_token: str | None, client_id: str) -> dict:
+    """Claims of the ID token Google returned from the token endpoint (received directly over TLS with our client secret, so the signature
+    check is skipped as Google documents). We still require: issuer, audience == our client id, not expired, a subject."""
+    if not id_token:
+        raise AppError(400, "oauth_exchange_failed", "Google did not return an identity.")
+    try:
+        claims = jwt.decode(id_token, options={"verify_signature": False, "verify_aud": False, "verify_exp": False})
+    except jwt.PyJWTError as exc:
+        raise AppError(400, "oauth_exchange_failed", "Google returned an unreadable identity.") from exc
+    aud = claims.get("aud")
+    if claims.get("iss") not in GOOGLE_ISSUERS or client_id not in ([aud] if isinstance(aud, str) else aud or []) \
+            or not isinstance(claims.get("exp"), (int, float)) or claims["exp"] < utcnow().timestamp() or not claims.get("sub"):
+        log.warning("Google ID token rejected (issuer/audience/expiry mismatch)")
+        raise AppError(400, "oauth_exchange_failed", "Google returned an invalid identity.")
+    return claims
+
+
+def google_complete(db: Session, code: str, state: str, nonce: str | None) -> User:
     s = get_settings()
     if not s.google_enabled:
         raise AppError(503, "google_not_configured", "Google sign-in is not configured on this server.")
     try:
-        security.decode_token(state, "oauth_state")
+        payload = security.decode_token(state, "oauth_state")
     except jwt.PyJWTError as exc:
         raise AppError(400, "oauth_state_invalid", "Sign-in expired or was tampered with. Please try again.") from exc
+    if not nonce or not hmac.compare_digest(str(payload.get("n", "")), nonce):         # state must belong to THIS browser
+        log.warning("Google callback rejected: state does not match the browser that started the sign-in")
+        raise AppError(400, "oauth_state_invalid", "Sign-in expired or was tampered with. Please try again.")
     try:
         with httpx.Client(timeout=10) as client:
             tok = client.post(
@@ -302,9 +326,16 @@ def google_complete(db: Session, code: str, state: str) -> User:
                 },
             )
             if tok.status_code != 200:
+                try:
+                    reason = tok.json().get("error")           # e.g. redirect_uri_mismatch / invalid_grant / invalid_client: server log only
+                except ValueError:
+                    reason = None
+                log.warning("Google token exchange failed: HTTP %s %s", tok.status_code, reason)
                 raise AppError(400, "oauth_exchange_failed", "Google rejected the sign-in request.")
+            tok_json = tok.json()
+            claims = _check_id_token(tok_json.get("id_token"), s.google_client_id)
             info = client.get(
-                GOOGLE_USERINFO_URL, headers={"Authorization": f"Bearer {tok.json()['access_token']}"}
+                GOOGLE_USERINFO_URL, headers={"Authorization": f"Bearer {tok_json['access_token']}"}
             )
             if info.status_code != 200:
                 raise AppError(400, "oauth_exchange_failed", "Could not read your Google profile.")
@@ -316,6 +347,9 @@ def google_complete(db: Session, code: str, state: str) -> User:
     if not email or not profile.get("email_verified"):
         raise AppError(400, "oauth_email_unverified", "Your Google email address is not verified.")
     sub = str(profile["sub"])
+    if sub != str(claims["sub"]) or (claims.get("email") and str(claims["email"]).lower() != email):
+        log.warning("Google identity mismatch between ID token and userinfo")
+        raise AppError(400, "oauth_exchange_failed", "Google returned an inconsistent identity.")
     user = db.scalar(select(User).where(User.google_sub == sub)) or get_user_by_email(db, email)
     if user is None:
         if not settings_service.get_value(db, "registration_enabled"):
@@ -334,6 +368,11 @@ def google_complete(db: Session, code: str, state: str) -> User:
     else:
         if user.google_sub and user.google_sub != sub:
             raise AppError(409, "oauth_conflict", "This email is linked to a different Google account.")
+        if not user.is_verified:
+            # Someone may have pre-registered this address with a password they chose but never proved they own the mailbox.
+            # Google just proved the real owner: drop that password so it cannot be used to enter the account.
+            user.password_hash = None
+            revoke_all_sessions(db, user.id)
         user.google_sub = sub
         user.is_verified = True  # Google asserted ownership of the email
         user.avatar_url = user.avatar_url or profile.get("picture")

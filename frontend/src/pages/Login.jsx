@@ -12,10 +12,22 @@ export const googleUrl = `${import.meta.env.VITE_API_URL || ''}/api/v1/auth/goog
 
 export function GoogleButton({ label = 'Continue with Google' }) {
   const { config } = useConfig()
+  const [busy, setBusy] = useState(false)
+  // Coming back with the browser's Back button restores this page from cache: don't leave the button stuck on "loading".
+  useEffect(() => {
+    const reset = (e) => { if (e.persisted) setBusy(false) }
+    window.addEventListener('pageshow', reset)
+    return () => window.removeEventListener('pageshow', reset)
+  }, [])
+  function go() {
+    if (busy) return
+    setBusy(true)
+    window.location.href = googleUrl
+  }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <Button variant="secondary" block onClick={() => (window.location.href = googleUrl)} disabled={!config.google_enabled} type="button">
-        <GoogleIcon /> {label}
+      <Button variant="secondary" block onClick={go} loading={busy} disabled={!config.google_enabled || busy} type="button">
+        {!busy && <GoogleIcon />} {busy ? 'Connecting to Google…' : label}
       </Button>
       {!config.google_enabled && <p className="field-hint" style={{ textAlign: 'center' }}>Google sign-in isn't configured on this server yet.</p>}
     </div>
