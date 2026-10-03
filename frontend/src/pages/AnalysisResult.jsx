@@ -20,19 +20,14 @@ const TYPE = {
 }
 
 /** The basic result shown when no detailed report exists (guidance off / unavailable). Same visual language, no internals. */
-function BasicResult({ ml }) {
+function BasicResult({ ml, retryable }) {
   const t = TYPE[ml.classification_type] || TYPE.UNKNOWN
   const Icon = t.icon
-  const pct = Math.round(ml.confidence * 100)
   return (
     <div className={`card card-pad res res-${t.tone}`} data-testid="basic-result" data-type={ml.classification_type}>
       <div className="res-top"><span className="res-icon"><Icon size={22} /></span><div><span className="res-kicker">Preliminary result</span>
         <h3 className="res-title">{ml.crop ? (ml.disease ? `${ml.crop} — ${ml.disease}` : `${ml.crop} — healthy`) : t.title}</h3></div></div>
-      <p>This preliminary result hasn't been verified yet. Try again to get the full, verified analysis.</p>
-      <div className="res-meter" aria-label={`Preliminary confidence ${pct}%`}>
-        <div className="res-meter-row"><span>Preliminary confidence</span><strong>{pct}%</strong></div>
-        <div className="res-bar"><i style={{ width: `${pct}%` }} /></div>
-      </div>
+      <p>{retryable ? "This preliminary result hasn't been verified yet. Try again to get the full, verified analysis." : "This is a preliminary result from the image analysis only. It hasn't been verified by the AI check."}</p>
       {(ml.classification_type === 'UNKNOWN' || ml.classification_type === 'NO_PLANT') && (
         <div className="res-cta"><Link to="/analyze" className="btn btn-primary"><ScanLine size={18} /> Upload another photo</Link></div>
       )}
@@ -117,7 +112,7 @@ function GuidanceBanner({ a, running, onRetry }) {
     <div className="card card-pad res res-wait" data-testid="ai-error" data-code={err.code}>
       <h3><AlertTriangle size={18} /> Guidance temporarily unavailable</h3>
       <p>{err.message}{wait}</p>
-      <p className="small muted">Your basic result above is still valid. {err.retryable ? 'You can try again for the detailed guidance.' : 'Trying again won’t help right now; please check back later.'}</p>
+      <p className="small muted">The preliminary result above hasn't been verified yet. {err.retryable ? 'Try again to get the full, verified analysis.' : 'Trying again won’t help right now; please check back later.'}</p>
       {err.retryable && <Button size="sm" loading={running} onClick={onRetry}>Try again</Button>}
     </div>
   )
@@ -198,7 +193,7 @@ export default function AnalysisResult() {
         </div>
         <div style={{ display: 'grid', gap: 18 }}>
           {final && <ReportSummary f={final} />}
-          {ml && !final && <BasicResult ml={ml} />}
+          {ml && !final && <BasicResult ml={ml} retryable={a?.status === 'partial'} />}
           <div className="card card-pad res-in">
             <div className="res-badges" style={{ marginTop: 0, marginBottom: 14 }}>
               <span className="mlbadge"><Cpu size={14} /> AGRO AI deep learning</span>
