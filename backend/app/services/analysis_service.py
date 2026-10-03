@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.models import Analysis, AnalysisStatus, User
-from app.ai import registry
+from app.ai import openrouter, registry
 from app.ai.base import ProviderError
 from app.core.security import utcnow
 from app.services import analysis_workflow, ml_service, routing, settings_service
@@ -312,7 +312,7 @@ def _ai_stage(db: Session, user: User, a: Analysis, ml: dict, image: bytes, forc
     except KeyError:
         return _guidance_failed(db, a, ml, "misconfigured", "Detailed guidance is temporarily unavailable.", False, None, "unknown_provider")
     a.ai_provider, a.ai_model = provider.name, provider.model
-    if not provider.is_configured() and not routing.any_specialist_configured(settings):
+    if not provider.is_configured() and not routing.any_specialist_configured(settings) and not openrouter.build(settings).is_configured():
         return _ml_only(db, a, ml, "not_configured")
     now = utcnow()
     cooldown = AI_FORCE_COOLDOWN if forced else AI_RETRY_COOLDOWN
@@ -346,6 +346,8 @@ def _ai_stage(db: Session, user: User, a: Analysis, ml: dict, image: bytes, forc
         a.status, a.ai_status, a.ai_error_code = AnalysisStatus.completed.value, info["gemini_error"], info["gemini_error_class"]
         db.commit()
         return a
+    if info.get("ai_used"):                                                       # answered by the OpenRouter fallback: record it for the admin
+        a.ai_provider, a.ai_model = info["ai_used"]["provider"], info["ai_used"]["model"][:80]
     a.result = _result(ml, ai=ai.model_dump(), final=report.model_dump(), stage="complete", case=case, plan=info["plan_done"], info=info)
     a.status, a.ai_status, a.ai_error_code, a.ai_completed_at = AnalysisStatus.completed.value, "completed", None, utcnow()
     db.commit()

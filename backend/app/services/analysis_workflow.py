@@ -13,7 +13,7 @@ import threading
 
 from pydantic import ValidationError
 
-from app.ai import imaging, prompts, safety
+from app.ai import imaging, openrouter, prompts, safety
 from app.ai.base import AIProvider, ProviderBadResponse, ProviderError, ProviderNotConfigured, ProviderRateLimited
 from app.ai.schemas import AIAnalysis, AnalysisReport, Disagreement
 from app.core.config import Settings
@@ -128,10 +128,17 @@ def specialist_report(ml: dict, ev: routing.Evidence) -> AnalysisReport | None:
     return AnalysisReport(status="UNCERTAIN", headline="We couldn't reach a reliable conclusion", **{**base, "disease_source": None})
 
 
+def _validated(response) -> AIAnalysis:
+    try:
+        return AIAnalysis.model_validate(response.data)
+    except ValidationError as exc:
+        raise ProviderBadResponse("answer did not match the schema: " + "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in exc.errors()[:4])) from exc
+
+
 def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Settings, on_stage=None) -> tuple[AIAnalysis | None, AnalysisReport, str, dict]:
     """Our model's confidence picks the specialist path (routing.py); then Gemini ALWAYS gets the ORIGINAL image, our model's result as a hint and
-    whatever evidence the specialists produced. If Gemini fails, the latest successful specialist result is returned as the final result
-    (ai is None then); with no specialist result the ProviderError propagates (existing behaviour: preliminary result + retry).
+    whatever evidence the specialists produced. If Gemini fails (both keys), ONE OpenRouter attempt follows (same request); if that fails too, the latest
+    successful specialist result is returned as the final result (ai is None then); with no specialist result the ProviderError propagates (existing behaviour: preliminary result + retry).
     Returns (ai, report, case, info); info is internal bookkeeping. `on_stage(name)` is called as each real step starts."""
     jpeg, mime = imaging.prepare_for_provider(image, settings.ai_max_image_side, settings.ml_max_pixels)
     route = routing.decide(ml, settings)
@@ -150,12 +157,23 @@ def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Setting
             response = provider.analyze(request)
         finally:
             gate.release()
-        try:
-            ai = AIAnalysis.model_validate(response.data)
-        except ValidationError as exc:
-            raise ProviderBadResponse("answer did not match the schema: " + "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in exc.errors()[:4])) from exc
+        ai = _validated(response)
     except ProviderError as exc:
         evidence.providers.append({"provider": provider.name, "step": "guidance", "status": exc.ai_status})
+        used = None
+        fallback = openrouter.build(settings)
+        if fallback.is_configured():                  # both Gemini keys failed: ONE OpenRouter attempt with the same image and prompt
+            try:
+                ai = _validated(fallback.analyze(request))
+            except ProviderError as exc2:
+                evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": exc2.ai_status})
+                log.warning("OpenRouter fallback failed (%s); using the latest specialist result if there is one", exc2.ai_status)
+            else:
+                evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": "ok"})
+                log.warning("AI guidance came from the OpenRouter fallback because Gemini failed (%s)", exc.ai_status)
+                used = {"provider": "openrouter", "model": fallback.model}
+                info.update(plan_done=evidence.steps_done + ["guidance"], specialists=evidence.internal(), ai_used=used)
+                return ai, build_report(ml, ai), case, info
         info["specialists"] = evidence.internal()
         report = specialist_report(ml, evidence)
         if report is None:

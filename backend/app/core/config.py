@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     ai_max_image_side: int = 1568           # longest side sent to the provider (metadata is stripped by re-encoding)
     ai_user_hourly_limit: int = 30          # provider calls per user per hour
 
+    # --- OpenRouter: used only after BOTH Gemini keys failed (one attempt); free vision-capable route by default ---
+    openrouter_api_key: SecretStr = SecretStr("")
+    openrouter_model: str = "openrouter/free"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+
     # --- Specialist plant/disease providers (all optional; each one that is not configured is simply skipped) ---
     plantnet_api_key: SecretStr = SecretStr("")         # plant identification (my.plantnet.org)
     plantnet_base_url: str = "https://my-api.plantnet.org"
@@ -164,7 +169,7 @@ class Settings(BaseSettings):
     def secret_values(self) -> list[str]:
         """Every provider secret, for log redaction. Never log or return these."""
         fields = (self.gemini_api_key, self.gemini_api_key_1, self.gemini_api_key_2, self.plantnet_api_key, self.plantix_api_key,
-                  self.kindwise_api_key, self.kindwise_plant_api_key, self.brevo_api_key)
+                  self.kindwise_api_key, self.kindwise_plant_api_key, self.brevo_api_key, self.openrouter_api_key)
         return [v for v in (f.get_secret_value().strip() for f in fields) if len(v) >= 6]
 
     @property
