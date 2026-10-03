@@ -15,21 +15,18 @@ const COLORS = { healthy: '#16a34a', disease: '#f59e0b', unresolved: '#94a3b8', 
 
 function ModelCard() {
   const { data: info, loading } = useAsync(() => api.get('/ml/info'))
-  const input = info?.model?.match(/(\d+)\s*x\s*(\d+)/i)
-  const arch = info?.model?.split(' (')[0]
   return (
     <div className="card card-pad model-card" data-testid="model-card">
-      <h3><Cpu size={16} /> AGRO AI ML Model</h3>
+      <h3><Cpu size={16} /> AGRO AI analysis</h3>
       {loading ? <Skeleton h={110} style={{ opacity: 0.25 }} /> : (
         <dl>
-          <dt>Architecture</dt><dd>{arch || 'MobileNetV3-Small'}</dd>
-          <dt>Input</dt><dd>{input ? `${input[1]} × ${input[2]}` : '224 × 224'}</dd>
-          <dt>Inference</dt><dd>ONNX Runtime</dd>
-          <dt>Guidance</dt><dd>Plant identification + AI</dd>
+          <dt>Image analysis</dt><dd>Deep learning</dd>
+          <dt>Verification</dt><dd>AI visual check</dd>
+          <dt>Guidance</dt><dd>Treatment &amp; prevention</dd>
           <dt>Status</dt><dd className="ready">{info?.available ? <><span className="pulse-dot" /> Ready</> : 'Unavailable'}</dd>
         </dl>
       )}
-      <p className="fine">Multi-stage plant analysis: deep learning, plant identification and agricultural AI guidance. Results are guidance, not a guarantee.</p>
+      <p className="fine">Every photo is analyzed in stages and checked visually by AI. Results are guidance, not a guarantee.</p>
     </div>
   )
 }

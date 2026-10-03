@@ -252,7 +252,7 @@ function AITab() {
     <div style={{ display: 'grid', gap: 18 }} data-testid="ai-tab">
       <div className="card card-pad form">
         <div className="setting-row" style={{ paddingTop: 0 }}>
-          <div className="grow"><strong>AI guidance</strong><span className="small muted">After our model runs, send the image to the selected AI provider for explanation and advice.</span></div>
+          <div className="grow"><strong>AI guidance</strong><span className="small muted">After our model runs, the original image is always sent to the selected AI provider, which inspects it independently (our model's result is only a hint) and writes the explanation and advice.</span></div>
           <span className={`badge ${st.tone}`} data-testid="ai-state">{st.label}</span>
           <Switch label="Enable AI guidance" checked={data.enabled} disabled={busy} onChange={(v) => save({ enabled: v })} />
         </div>
@@ -275,7 +275,7 @@ function AITab() {
             {p.name === data.active_provider && <span className="badge dark">Active</span>}
           </div>
         ))}
-        <p className="small muted">API keys are read from the server environment (for Gemini: <code>GEMINI_API_KEY</code>). They are never stored in the database, returned by the API, or shown here.</p>
+        <p className="small muted">API keys are read from the server environment (for Gemini: <code>GEMINI_API_KEY_1</code> and <code>GEMINI_API_KEY_2</code>). They are never stored in the database, returned by the API, or shown here.</p>
         <div><Button variant="secondary" size="sm" loading={testing} onClick={runTest}>Test connection</Button></div>
         {test && (
           <Alert tone={test.ok ? 'success' : 'error'} data-testid="ai-test-result">

@@ -146,7 +146,7 @@ def test_full_stack_with_real_gemini_adapter_success(client, admin_auth, real_ge
     _use_mock_gemini(handler)
     aid, r = _analyze(client, admin_auth, (255, 0, 0))
     b = r.json()
-    assert b["status"] == "completed" and b["ai_provider"] == "gemini" and b["result"]["final"]["disease_source"] == "ml"
+    assert b["status"] == "completed" and b["ai_provider"] == "gemini" and b["result"]["final"]["disease_source"] == "ai"
     assert seen["key"] == KEY and KEY not in seen["url"] and "inlineData" in json.dumps(seen["body"]) and KEY not in r.text
 
 

@@ -17,7 +17,7 @@ from app.models import Analysis, AnalysisStatus, User
 from app.ai import registry
 from app.ai.base import ProviderError
 from app.core.security import utcnow
-from app.services import analysis_workflow, ml_service, routing, settings_service
+from app.services import analysis_workflow, ml_service, settings_service
 
 CHUNK = 1024 * 256
 log = logging.getLogger("agroai.analysis")
@@ -264,18 +264,14 @@ def _claim(db: Session, a: Analysis) -> None:
 
 
 def _result(ml, ai=None, final=None, ai_error=None, stage="ml_done", case=None, plan=None, info=None) -> dict:
-    """`plan` = customer-safe step names ("identify" / "disease" / "guidance") that will run or did run. `info` (internal, admin-only):
-    route code and specialist evidence/provider status."""
+    """`plan` = customer-safe step names that will run or did run (always ["guidance"] after our model). `info` is kept for compatibility."""
     out = {"ml": ml, "ai": ai, "final": final, "ai_error": ai_error, "stage": stage, "plan": plan or ["guidance"],
            "prompt_version": analysis_workflow.prompts.PROMPT_VERSION, "ai_case": case}
-    if info:
-        out["route"], out["specialists"] = info.get("route"), info.get("specialists")
     return out
 
 
 def _planned(ml: dict) -> list[str]:
-    s = get_settings()
-    return routing.planned_steps(routing.decide(ml, s), s)
+    return ["guidance"]                      # every analysis: our model, then the AI's independent look at the original image
 
 
 def _ml_only(db: Session, a: Analysis, ml: dict, ai_status: str) -> Analysis:

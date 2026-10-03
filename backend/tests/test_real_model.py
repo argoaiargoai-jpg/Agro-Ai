@@ -191,28 +191,27 @@ def analyze(client, headers, r):
 
 
 @needs_data
-def test_real_model_disease_goes_to_the_ai_as_advice_only(client, admin_auth, sc):
+def test_real_model_disease_still_goes_to_the_ai_which_decides_what_the_customer_sees(client, admin_auth, sc):
     r = first_with_state(lambda r: r["label_out"] == "Tomato___Early_blight", "DISEASE")
-    sc.respond(diseased("Something Else", ml_consistency="consistent"))
+    sc.respond(diseased("Rice Blast", crop="Rice", plant="Rice", ml_consistency="inconsistent"))        # the AI sees a different plant
     b = analyze(client, admin_auth, r)
     ml = b["result"]["ml"]
     assert ml["model_version"] == "colab" and ml["classification_type"] == "DISEASE" and (ml["crop"], ml["disease"]) == ("Tomato", "Early Blight")     # the real model
     f = b["result"]["final"]
-    assert f["status"] == "DISEASE" and (f["crop"], f["disease"], f["disease_source"]) == ("Tomato", "Early Blight", "ml") and f["treatment"]            # AI never overrides
+    assert f["status"] == "DISEASE" and (f["crop"], f["disease"], f["disease_source"]) == ("Rice", "Rice Blast", "ai") and f["treatment"]          # the AI's assessment wins
     req = sc.requests[0]
-    assert req.image and "ALREADY identified" in req.prompt and "Tomato" in req.prompt and "Early Blight" in req.prompt                                  # image + the real ML result
+    assert req.image and "Tomato with Early Blight" in req.prompt and "Do NOT accept it blindly" in req.prompt                                      # image + our result as a hint only
 
 
 @needs_data
-def test_real_model_healthy_goes_to_the_ai_with_context_and_is_still_inspected(client, user_auth, sc):
+def test_real_model_healthy_goes_to_the_ai_as_a_hint_and_is_still_inspected(client, user_auth, sc):
     r = first_with_state(lambda r: r["label_out"] == "Grape___healthy", "HEALTHY")
     sc.respond(payload(crop="Grape", plant="Grape"))
     b = analyze(client, user_auth, r)
     assert b["result"]["ml"]["classification_type"] == "HEALTHY" and b["result"]["ml"]["model_version"] == "colab"
     assert b["result"]["final"]["status"] == "HEALTHY"
     req = sc.requests[0]
-    # confident (>= 80%): the image goes to the AI together with our result as CONTEXT; the AI still inspects independently and is not told to copy it
-    assert req.image and "ML_HEALTHY" in req.prompt and "ALREADY identified" not in req.prompt and "Inspect the image yourself" in req.prompt
+    assert req.image and "INDEPENDENT_VERIFICATION" in req.prompt and "healthy Grape" in req.prompt and "Do NOT accept it blindly" in req.prompt
 
 
 @needs_data
@@ -230,7 +229,7 @@ def test_real_model_unknown_is_analysed_independently_by_the_ai(client, user_aut
     sc.respond(payload(health_status="uncertain", crop=None, plant=None))
     b = analyze(client, user_auth, r)
     assert b["result"]["ml"]["classification_type"] == "UNKNOWN" and b["result"]["final"]["status"] == "UNCERTAIN"
-    assert sc.requests[0].image and "ML_UNKNOWN" in sc.requests[0].prompt
+    assert sc.requests[0].image and "INDEPENDENT_VERIFICATION" in sc.requests[0].prompt
 
 
 @needs_data

@@ -1,10 +1,12 @@
-"""Turns (our ML result + the AI provider's independent/advisory output) into the final report.
+"""Turns (our ML result + the AI provider's independent visual assessment) into the final report.
 
-This is a plain mapping, NOT a decision engine: no voting, no confidence averaging. Rules, per ML state:
-  DISEASE  -> identity stays OURS (disease_source "ml"); the AI only adds explanation and advice.
-  HEALTHY  -> the AI inspects independently. If it sees disease, the AI's disease is shown AND the disagreement is stated.
-  UNKNOWN  -> the AI does a full independent analysis; "uncertain" is a valid, honest outcome.
-  NO_PLANT -> the AI independently decides; only if it also finds no plant is the image rejected.
+A plain mapping, NOT a decision engine: no voting, no confidence averaging, no routing by confidence. For EVERY analysis the AI receives the
+original image and inspects it independently; our model's result is only supporting context. The customer sees the AI's visual assessment:
+  plant not present        -> "No plant detected"
+  diseased, disease named  -> that plant and disease (even if our model said something else)
+  healthy                  -> that plant, healthy
+  anything else / low certainty -> an honest "not a reliable conclusion"; our model's prediction is never shown as confirmed
+Any difference between the two is kept in the internal `disagreement` field (administrators only).
 """
 import logging
 import threading
@@ -15,7 +17,6 @@ from app.ai import imaging, prompts, safety
 from app.ai.base import AIProvider, ProviderBadResponse, ProviderRateLimited
 from app.ai.schemas import AIAnalysis, AnalysisReport, Disagreement
 from app.core.config import Settings
-from app.services import routing
 
 log = logging.getLogger("agroai.workflow")
 
@@ -59,66 +60,58 @@ def _guidance(ai: AIAnalysis) -> dict:
                 warnings=warnings, ai_notes=ai.ai_notes, identification_confidence=ai.identification_confidence, **out)
 
 
-def build_report(ml: dict, ai: AIAnalysis, route: str = "A") -> AnalysisReport:
+def _same_plant(a: str | None, b: str | None) -> bool:
+    x, y = (a or "").strip().lower(), (b or "").strip().lower()
+    return bool(x and y) and (x in y or y in x)
+
+
+def _internal_disagreement(ml: dict, ai: AIAnalysis, status: str, shown_plant: str | None, shown_disease: str | None) -> Disagreement | None:
+    """Admin-only record of how the AI's assessment differs from our model's. Never rendered for customers."""
     state = ml["classification_type"]
-    g = _guidance(ai)
-    base = dict(ml_state=state, disclaimer=DISCLAIMER, **g)
-    ml_text = _ml_label(ml)
+    differs = ai.ml_consistency == "inconsistent"
+    if state in ("DISEASE", "HEALTHY"):
+        differs = differs or status in ("REJECTED", "UNCERTAIN") or (status == "DISEASE") != (state == "DISEASE") \
+            or (shown_plant is not None and not _same_plant(shown_plant, ml.get("crop"))) \
+            or (status == "DISEASE" and not _same_plant(shown_disease, ml.get("disease")))
+    elif state == "NO_PLANT":
+        differs = differs or ai.plant_present
+    elif state == "UNKNOWN":
+        differs = differs or not ai.plant_present
+    if not differs:
+        return None
+    seen = {"REJECTED": "No plant material visible", "UNCERTAIN": "No reliable conclusion",
+            "HEALTHY": f"Healthy {shown_plant or 'plant'}", "DISEASE": f"{shown_plant or 'Plant'}: {shown_disease}"}[status]
+    return Disagreement(ml_said=_ml_label(ml), ai_said=seen,
+                        message="The AI's visual assessment differs from our first-stage model's result. The assessment shown is the AI's.")
 
-    if state == "DISEASE" and route == "A":                          # confident: identity is OURS; AI = explanation only
-        crop, disease = ml.get("crop"), ml.get("disease")
-        dis = None
-        if ai.ml_consistency == "inconsistent":
-            dis = Disagreement(ml_said=ml_text, ai_said="The AI reviewer could not visually confirm this",
-                               message="The AI reviewer saw evidence that does not clearly match our model's identification. "
-                                       "The identification shown comes from our model; please verify it before acting.")
-        return AnalysisReport(status="DISEASE", headline=f"{crop} — {disease}", plant=crop, crop=crop, disease=disease,
-                              disease_source="ml", disagreement=dis, **base)
 
-    # HEALTHY / UNKNOWN / NO_PLANT (and DISEASE when our confidence was below the trust threshold): the AI analysed independently
-    plant = ai.plant or (ml.get("crop") if state == "HEALTHY" else None)
-    crop = ai.crop or (ml.get("crop") if state == "HEALTHY" else None)
+def build_report(ml: dict, ai: AIAnalysis) -> AnalysisReport:
+    state = ml["classification_type"]
+    base = dict(ml_state=state, disclaimer=DISCLAIMER, **_guidance(ai))
+    plant, crop = ai.plant, ai.crop                       # identity comes ONLY from the AI's own look at the image, never from our model
 
     if not ai.plant_present:
-        if state == "NO_PLANT":
-            return AnalysisReport(status="REJECTED", headline="No plant detected", disagreement=None,
-                                  rejection_reason="We couldn't find a plant, crop or leaf in this image. "
-                                                   "Please upload a clear, well-lit photo of a leaf or plant.", **base)
-        dis = Disagreement(ml_said=ml_text, ai_said="No plant material visible",
-                           message="The AI reviewer found no plant material in this image, which does not match the first-stage result.")
-        if state == "UNKNOWN":
-            return AnalysisReport(status="REJECTED", headline="No plant detected", disagreement=dis,
-                                  rejection_reason="We couldn't find plant material in this image. Please upload a clear photo of a leaf or plant.", **base)
-        return AnalysisReport(status="UNCERTAIN", headline="We couldn't reach a reliable conclusion", disagreement=dis, **base)   # ML said healthy
+        return AnalysisReport(status="REJECTED", headline="No plant detected", disagreement=_internal_disagreement(ml, ai, "REJECTED", None, None),
+                              rejection_reason="We couldn't find a plant, crop or leaf in this image. "
+                                               "Please upload a clear, well-lit photo of a leaf or plant.", **base)
 
-    disagreement = None
-    if state == "NO_PLANT":
-        disagreement = Disagreement(ml_said=ml_text, ai_said=f"Plant material detected{f': {ai.plant}' if ai.plant else ''}",
-                                    message="Our first-stage model did not detect a plant, but the AI reviewer did, so the analysis continued.")
-
-    if ai.health_status == "diseased" and ai.disease:
-        if state == "HEALTHY":
-            disagreement = Disagreement(ml_said=ml_text, ai_said=ai.disease,
-                                        message="The external AI detected a possible disease even though our first-stage model read this plant as healthy. "
-                                                "Both views are shown; please inspect the plant and verify.")
+    conclusive = ai.identification_confidence != "low"
+    if ai.health_status == "diseased" and ai.disease and conclusive:
         return AnalysisReport(status="DISEASE", headline=f"{crop or plant or 'Plant'} — {ai.disease}", plant=plant, crop=crop, disease=ai.disease,
-                              disease_source="ai", disagreement=disagreement, **base)
-    if ai.health_status == "healthy":
+                              disease_source="ai", disagreement=_internal_disagreement(ml, ai, "DISEASE", crop or plant, ai.disease), **base)
+    if ai.health_status == "healthy" and conclusive:
         return AnalysisReport(status="HEALTHY", headline=f"{crop or plant or 'Plant'} looks healthy", plant=plant, crop=crop, disease=None,
-                              disease_source=None, disagreement=disagreement, **base)
+                              disease_source=None, disagreement=_internal_disagreement(ml, ai, "HEALTHY", crop or plant, None), **base)
     return AnalysisReport(status="UNCERTAIN", headline="We couldn't reach a reliable conclusion", plant=plant, crop=crop, disease=None,
-                          disagreement=disagreement, **base)
+                          disagreement=_internal_disagreement(ml, ai, "UNCERTAIN", crop or plant, None), **base)
 
 
 def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Settings, on_stage=None) -> tuple[AIAnalysis, AnalysisReport, str, dict]:
-    """Image + our result -> (route-dependent specialist evidence) -> Gemini -> validated AI analysis + final report.
-    Returns (ai, report, case, info) where info = {"route", "plan_done", "specialists"} (internal bookkeeping). Raises ProviderError subclasses;
-    never fabricates. `on_stage(name)` is called with "identify" / "disease" / "guidance" as each real step starts."""
+    """ORIGINAL image + our model's result (as a hint) -> the AI provider -> validated assessment -> final report.
+    Called for every analysis, whatever our model's confidence. Returns (ai, report, case, info). Raises ProviderError subclasses; never fabricates.
+    `on_stage("guidance")` is called when the provider request starts."""
     jpeg, mime = imaging.prepare_for_provider(image, settings.ai_max_image_side, settings.ml_max_pixels)
-    route = routing.decide(ml, settings)
-    evidence = routing.gather(route, jpeg, mime, settings, on_stage)      # the same re-encoded image bytes go to every visual provider
-    ev = evidence.internal()
-    request, case = prompts.build_request(ml, jpeg, mime, route.code, ev)
+    request, case = prompts.build_request(ml, jpeg, mime)
     if on_stage:
         on_stage("guidance")
     gate = _provider_gate(settings)
@@ -132,5 +125,4 @@ def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Setting
         ai = AIAnalysis.model_validate(response.data)
     except ValidationError as exc:
         raise ProviderBadResponse("answer did not match the schema: " + "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in exc.errors()[:4])) from exc
-    info = {"route": route.code, "plan_done": evidence.steps_done + ["guidance"], "specialists": ev}
-    return ai, build_report(ml, ai, route.code), case, info
+    return ai, build_report(ml, ai), case, {"plan_done": ["guidance"]}

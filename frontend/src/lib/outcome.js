@@ -42,7 +42,7 @@ export const STEP_LABELS = {
   ml: { label: 'AGRO AI deep-learning analysis', hint: 'Examining the image' },
   identify: { label: 'Plant identification', hint: 'Identifying the plant' },
   disease: { label: 'Agricultural disease analysis', hint: 'Checking for diseases and disorders' },
-  guidance: { label: 'AI guidance', hint: 'Generating agricultural guidance' },
+  guidance: { label: 'AI verification & guidance', hint: 'Checking the image and generating guidance' },
   final: { label: 'Final result' },
 }
 

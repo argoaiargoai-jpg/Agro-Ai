@@ -1,7 +1,7 @@
 """The ACTUAL uploaded image must reach Gemini in every ML case (real GeminiProvider, HTTP mocked at the transport).
 
 Verified per case: the request carries prompt + inline image bytes + a matching MIME type, the pixels are the user's,
-the image is not replaced by a filename/URL, the ML result is passed only for DISEASE, and the key stays in a header.
+the image is not replaced by a filename/URL, our model's result is passed as a hint for every outcome, and the key stays in a header.
 """
 import base64
 import io
@@ -92,11 +92,9 @@ def test_the_actual_image_is_sent_to_gemini_in_every_case(client, user_auth, col
     assert "responseSchema" in call["body"]["generationConfig"] or "responseJsonSchema" in call["body"]["generationConfig"]
 
     prompt = texts[0]
-    assert f"CASE: ML_{case}" in prompt
-    if case == "DISEASE":                                                          # the ML result is context ONLY when the ML identified a disease
-        assert "Early Blight" in prompt and "Tomato" in prompt
-    else:
-        assert "Early Blight" not in prompt and "predicted" not in prompt.lower()
+    assert "CASE: INDEPENDENT_VERIFICATION" in prompt and "Do NOT accept it blindly" in prompt          # same independent check for every outcome
+    hint = {"DISEASE": "Tomato with Early Blight", "HEALTHY": "healthy Tomato", "UNKNOWN": "could not identify or classify reliably", "NO_PLANT": "no plant in the image"}[case]
+    assert hint in prompt                                                          # our result is passed as supporting context in every case
 
 
 def test_metadata_is_stripped_from_the_image_sent_to_gemini(client, user_auth):

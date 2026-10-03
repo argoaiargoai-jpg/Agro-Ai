@@ -69,7 +69,7 @@ def test_request_is_correct_and_the_key_never_appears_in_the_url(settings):
 
 def test_prompt_builder_produces_a_schema_valid_request():
     req, case = prompts.build_request({"classification_type": "DISEASE", "crop": "Tomato", "disease": "Early Blight"}, b"x", "image/jpeg")
-    assert case == "DISEASE" and req.json_schema is AI_JSON_SCHEMA and req.image == b"x"
+    assert case == "INDEPENDENT_VERIFICATION" and req.json_schema is AI_JSON_SCHEMA and req.image == b"x"
     AIAnalysis.model_validate(payload())                                                    # the documented shape is itself valid
 
 

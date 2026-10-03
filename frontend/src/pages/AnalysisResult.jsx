@@ -24,14 +24,13 @@ function BasicResult({ ml }) {
   const t = TYPE[ml.classification_type] || TYPE.UNKNOWN
   const Icon = t.icon
   const pct = Math.round(ml.confidence * 100)
-  const label = ml.classification_type === 'NO_PLANT' ? 'Certainty it is not a plant' : 'Confidence'
   return (
     <div className={`card card-pad res res-${t.tone}`} data-testid="basic-result" data-type={ml.classification_type}>
-      <div className="res-top"><span className="res-icon"><Icon size={22} /></span><div><span className="res-kicker">{t.title}</span>
+      <div className="res-top"><span className="res-icon"><Icon size={22} /></span><div><span className="res-kicker">Preliminary result</span>
         <h3 className="res-title">{ml.crop ? (ml.disease ? `${ml.crop} — ${ml.disease}` : `${ml.crop} — healthy`) : t.title}</h3></div></div>
-      <p>{ml.message}</p>
-      <div className="res-meter" aria-label={`${label} ${pct}%`}>
-        <div className="res-meter-row"><span>{label}</span><strong>{pct}%</strong></div>
+      <p>This preliminary result hasn't been verified yet. Try again to get the full, verified analysis.</p>
+      <div className="res-meter" aria-label={`Preliminary confidence ${pct}%`}>
+        <div className="res-meter-row"><span>Preliminary confidence</span><strong>{pct}%</strong></div>
         <div className="res-bar"><i style={{ width: `${pct}%` }} /></div>
       </div>
       {(ml.classification_type === 'UNKNOWN' || ml.classification_type === 'NO_PLANT') && (

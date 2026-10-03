@@ -49,29 +49,66 @@ def final(r):
     return r.json()["result"]["final"]
 
 
-# ------------------------------------------------------------------------------------------- CASE A: ML = DISEASE
-def test_a_disease_identity_stays_ml_and_ai_only_advises(client, admin_auth, sc):
-    sc.respond(diseased("Totally Different Disease", ml_consistency="consistent"))      # the AI names something else: must NOT override
+# ------------------------------------------------------------------------------------------- the AI always verifies the original image itself
+def test_a_ml_disease_and_ai_agrees_gives_the_normal_result(client, admin_auth, sc):
+    sc.respond(diseased("Early Blight", ml_consistency="consistent"))
     _, r = run(client, admin_auth, RED)
     assert r.status_code == 200, r.text
     f, body = final(r), r.json()
-    assert f["status"] == "DISEASE" and f["disease"] == "Early Blight" and f["crop"] == "Tomato" and f["disease_source"] == "ml"
+    assert f["status"] == "DISEASE" and f["disease"] == "Early Blight" and f["crop"] == "Tomato" and f["disease_source"] == "ai"
     assert f["symptoms"] and f["treatment"] and f["prevention"] is not None and f["spread_risk"]["level"] == "high"
     assert f["disagreement"] is None and f["ml_state"] == "DISEASE"
     assert body["status"] == "completed" and body["ai_status"] == "completed" and body["result"]["stage"] == "complete"
-    prompt = sc.requests[0].prompt
-    assert "ALREADY identified" in prompt and "Early Blight" in prompt and "Tomato" in prompt and sc.requests[0].image
+    assert body["result"]["plan"] == ["guidance"]
 
 
-def test_a_ai_inconsistency_is_surfaced_but_does_not_change_the_disease(client, admin_auth, sc):
-    sc.respond(diseased("Something Else", ml_consistency="inconsistent"))
+def test_a_the_ai_receives_the_image_and_our_result_only_as_a_hint_it_must_not_accept_blindly(client, admin_auth, sc):
+    sc.respond(diseased("Early Blight"))
+    run(client, admin_auth, RED)
+    req = sc.requests[0]
+    assert req.image and req.image[:2] == b"\xff\xd8"                                   # the actual (re-encoded) image bytes
+    p = req.prompt
+    assert "INDEPENDENT_VERIFICATION" in p and "Tomato with Early Blight" in p and "confidence" in p
+    assert "Do NOT accept it blindly" in p and "a high confidence does not make it right" in p
+    assert "Your own visual assessment is what will be shown" in p and "ALREADY identified" not in p      # no longer "treat our result as a given fact"
+
+
+def test_a_ai_disagrees_with_ml_and_the_customer_sees_the_ais_assessment(client, admin_auth, sc):
+    """Our model is 'sure' it is tomato early blight; the AI sees rice. The final result must be the AI's."""
+    sc.respond(diseased("Rice Blast", crop="Rice", plant="Rice", ml_consistency="inconsistent"))
     _, r = run(client, admin_auth, RED)
     f = final(r)
-    assert f["disease"] == "Early Blight" and f["disease_source"] == "ml"
-    assert f["disagreement"] and "verify" in f["disagreement"]["message"].lower()
+    assert f["status"] == "DISEASE" and f["headline"] == "Rice — Rice Blast" and f["plant"] == "Rice" and f["crop"] == "Rice" and f["disease"] == "Rice Blast"
+    assert f["disease_source"] == "ai" and "Tomato" not in f["headline"] and "Early Blight" not in str(f["symptoms"] + f["treatment"] + [f["headline"]])
+    d = f["disagreement"]
+    assert d and "Early Blight" in d["ml_said"] and "Rice" in d["ai_said"]                  # kept for administrators only
 
 
-# ------------------------------------------------------------------------------------------- CASE B: ML = HEALTHY
+def test_a_ai_says_healthy_while_ml_said_disease_follows_the_ai(client, admin_auth, sc):
+    sc.respond(payload(crop="Tomato", plant="Tomato"))
+    f = final(run(client, admin_auth, RED)[1])
+    assert f["status"] == "HEALTHY" and f["disease"] is None and f["disagreement"] and "Early Blight" in f["disagreement"]["ml_said"]
+
+
+def test_a_ai_cannot_be_sure_so_our_prediction_is_not_shown_as_confirmed(client, admin_auth, sc):
+    sc.respond(payload(health_status="uncertain", crop=None, plant=None, ai_notes="Cannot identify this crop.", identification_confidence="low"))
+    f = final(run(client, admin_auth, RED)[1])
+    assert f["status"] == "UNCERTAIN" and f["disease"] is None and f["crop"] is None and "Early Blight" not in f["headline"] and "Tomato" not in f["headline"]
+
+
+def test_a_a_low_certainty_diagnosis_is_not_presented_as_a_finding(client, admin_auth, sc):
+    sc.respond(diseased("Early Blight", identification_confidence="low"))
+    f = final(run(client, admin_auth, RED)[1])
+    assert f["status"] == "UNCERTAIN" and f["disease"] is None
+
+
+def test_the_identity_never_falls_back_to_our_models_crop(client, admin_auth, sc):
+    sc.respond(payload(crop=None, plant=None))                                             # AI: healthy, but names no plant
+    f = final(run(client, admin_auth, GREEN)[1])
+    assert f["status"] == "HEALTHY" and f["crop"] is None and f["plant"] is None and "Tomato" not in f["headline"]
+
+
+# ------------------------------------------------------------------------------------------- ML = HEALTHY
 def test_b_healthy_confirmed_by_ai(client, admin_auth, sc):
     sc.respond(payload())
     _, r = run(client, admin_auth, GREEN)
@@ -79,23 +116,23 @@ def test_b_healthy_confirmed_by_ai(client, admin_auth, sc):
     assert f["status"] == "HEALTHY" and f["disease"] is None and f["disease_source"] is None and f["disagreement"] is None
     assert f["prevention"] and f["crop"] == "Tomato"
     p = sc.requests[0]
-    assert p.image and "ALREADY identified" not in p.prompt and "independently" in p.prompt.lower()    # independent: not told what ML said
+    assert p.image and "healthy Tomato" in p.prompt and "Do NOT accept it blindly" in p.prompt
 
 
-def test_b_ai_finds_disease_despite_ml_healthy_and_disagreement_is_shown(client, admin_auth, sc):
+def test_b_ai_finds_disease_despite_ml_healthy_and_disagreement_is_kept_internally(client, admin_auth, sc):
     sc.respond(diseased("Early Blight"))
     _, r = run(client, admin_auth, GREEN)
     f = final(r)
     assert f["status"] == "DISEASE" and f["disease"] == "Early Blight" and f["disease_source"] == "ai"
     d = f["disagreement"]
-    assert d and d["ai_said"] == "Early Blight" and "first-stage" in d["message"] and "healthy" in d["ml_said"].lower()
+    assert d and "Tomato: Early Blight" in d["ai_said"] and "healthy" in d["ml_said"].lower()
 
 
-def test_b_ai_says_no_plant_while_ml_says_healthy_is_uncertain_not_hidden(client, admin_auth, sc):
+def test_b_ai_says_no_plant_while_ml_says_healthy_follows_the_ai(client, admin_auth, sc):
     sc.respond(NO_PLANT)
     _, r = run(client, admin_auth, GREEN)
     f = final(r)
-    assert f["status"] == "UNCERTAIN" and f["disagreement"]["ai_said"] == "No plant material visible"
+    assert f["status"] == "REJECTED" and f["headline"] == "No plant detected" and f["disagreement"]["ai_said"] == "No plant material visible"
 
 
 def test_b_ai_uncertain(client, admin_auth, sc):
@@ -108,7 +145,7 @@ def test_diseased_without_a_disease_name_is_not_trusted(client, admin_auth, sc):
     assert final(run(client, admin_auth, GREEN)[1])["status"] == "UNCERTAIN"
 
 
-# ------------------------------------------------------------------------------------------- CASE C: ML = UNKNOWN
+# ------------------------------------------------------------------------------------------- ML = UNKNOWN
 @pytest.mark.parametrize("answer,status,source", [
     (diseased("Powdery Mildew", crop="Cucumber", plant="Cucumber"), "DISEASE", "ai"),
     (payload(crop="Cucumber"), "HEALTHY", None),
@@ -121,18 +158,18 @@ def test_c_unknown_gets_a_full_independent_analysis(client, admin_auth, sc, answ
     f = final(r)
     assert f["status"] == status and f["disease_source"] == source and f["ml_state"] == "UNKNOWN"
     p = sc.requests[0]
-    assert p.image and "ML_UNKNOWN" in p.prompt and "ALREADY identified" not in p.prompt
+    assert p.image and "INDEPENDENT_VERIFICATION" in p.prompt and "could not identify or classify reliably" in p.prompt
     if status == "UNCERTAIN":
         assert f["disease"] is None                                       # an honest "can't tell", nothing invented
 
 
-# ------------------------------------------------------------------------------------------- CASE D: ML = NO_PLANT
+# ------------------------------------------------------------------------------------------- ML = NO_PLANT
 def test_d_no_plant_still_sent_to_ai_and_confirmed(client, admin_auth, sc):
     sc.respond(NO_PLANT)
     _, r = run(client, admin_auth, BLUE)
     f = final(r)
     assert len(sc.requests) == 1 and sc.requests[0].image                    # NOT auto-rejected: the image still went to the AI
-    assert f["status"] == "REJECTED" and f["headline"] == "No plant detected" and f["rejection_reason"]
+    assert f["status"] == "REJECTED" and f["headline"] == "No plant detected" and f["rejection_reason"] and f["disagreement"] is None
     assert r.json()["status"] == "completed"
 
 
@@ -141,7 +178,7 @@ def test_d_ai_finds_plant_so_analysis_continues(client, admin_auth, sc):
     _, r = run(client, admin_auth, BLUE)
     f = final(r)
     assert f["status"] == "DISEASE" and f["disease"] == "Leaf Spot" and f["disease_source"] == "ai" and f["ml_state"] == "NO_PLANT"
-    assert f["disagreement"]["ml_said"] == "No plant detected" and "Plant material detected" in f["disagreement"]["ai_said"]
+    assert f["disagreement"]["ml_said"] == "No plant detected"
 
 
 # ------------------------------------------------------------------------------------------- failures: ML result is kept, retry works
@@ -167,7 +204,7 @@ def test_provider_failures_keep_the_ml_result_and_are_classified(client, admin_a
 
 
 def test_retry_after_failure_reuses_the_ml_result_and_succeeds(client, admin_auth, sc):
-    sc.respond(ProviderTimeout("t"), diseased("X", ml_consistency="consistent"))
+    sc.respond(ProviderTimeout("t"), diseased("Early Blight", ml_consistency="consistent"))
     aid, r = run(client, admin_auth, RED)
     first_ml = r.json()["result"]["ml"]
     assert r.json()["status"] == "partial"

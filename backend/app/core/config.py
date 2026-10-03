@@ -75,8 +75,6 @@ class Settings(BaseSettings):
     kindwise_plant_api_key: SecretStr = SecretStr("")   # plant.health (non-crop plants); separate Kindwise product, optional
     kindwise_plant_base_url: str = "https://plant.id"
     specialist_timeout_seconds: float = 20.0
-    route_high_confidence: float = 0.80                 # >= this: our model's answer goes to Gemini together with the image
-    route_mid_confidence: float = 0.50                  # below this: plant identification first; between: disease specialists
 
     ml_model_dir: str = ""              # default: app/ml (model + metadata shipped with the app)
     ml_threads: int = 1                 # ONNX Runtime CPU threads (keep low on small free-tier machines)
