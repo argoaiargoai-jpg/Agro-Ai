@@ -157,3 +157,71 @@ def test_every_provider_secret_is_in_the_log_redaction_list():
     s = S(gemini_api_key_1="g1-" + "x" * 10, gemini_api_key_2="g2-" + "x" * 10, plantnet_api_key="pn-" + "x" * 10, plantix_api_key="px-" + "x" * 10,
           kindwise_api_key="kw-" + "x" * 10, kindwise_plant_api_key="kp-" + "x" * 10, brevo_api_key="bv-" + "x" * 10)
     assert len(s.secret_values()) == 7 and not any(v in repr(s) for v in s.secret_values())
+
+
+# ------------------------------------------------------------------------------------------------ Pl@ntNet production fix
+def strict_plantnet(req: httpx.Request) -> httpx.Response:
+    """Behaves like the real API for the case that broke production: organs given twice (query + form) is a 400 Bad Request."""
+    organs_in_query = req.url.params.get_list("organs")
+    organs_in_form = req.content.count(b'name="organs"')
+    images = req.content.count(b'name="images"')
+    if len(organs_in_query) + organs_in_form != images:
+        return httpx.Response(400, json={"statusCode": 400, "error": "Bad Request", "message": "organs must have the same length as images"})
+    return js(200, PLANTNET_OK)
+
+
+def test_plantnet_sends_organs_exactly_once_so_the_strict_api_accepts_it():
+    out = PlantNetProvider(S(plantnet_api_key=KEY), httpx.MockTransport(strict_plantnet)).identify(IMG, "image/jpeg")
+    assert out and out[0].name == "French rose"
+
+
+def test_plantnet_request_shape_is_the_documented_one():
+    rec = Rec(js(200, PLANTNET_OK))
+    PlantNetProvider(S(plantnet_api_key=KEY), rec.transport).identify(IMG, "image/jpeg")
+    req = rec.requests[0]
+    assert dict(req.url.params) == {"api-key": KEY, "nb-results": "3"} and req.url.path == "/v2/identify/all"
+    assert req.content.count(b'name="images"') == 1 and req.content.count(b'name="organs"') == 1 and b"auto" in req.content
+    assert b'filename="plant.jpg"' in req.content and b"image/jpeg" in req.content and IMG in req.content
+
+
+def test_a_bad_request_reply_is_diagnosable_without_leaking_the_key():
+    resp = httpx.Response(400, json={"message": "organs mismatch", "echo": "key was " + KEY})
+    with pytest.raises(SpecialistError) as e:
+        PlantNetProvider(S(plantnet_api_key=KEY), Rec(resp).transport).identify(IMG, "image/jpeg")
+    assert e.value.kind == "bad_response" and "HTTP 400" in e.value.detail and "application/json" in e.value.detail and "organs mismatch" in e.value.detail
+    assert len(e.value.detail) < 260
+
+
+def test_the_routing_log_shows_what_the_provider_said_with_secrets_removed(caplog, monkeypatch):
+    from pydantic import SecretStr
+
+    from app.core.config import get_settings
+    from app.services import routing
+    monkeypatch.setattr(get_settings(), "plantnet_api_key", SecretStr(KEY))
+    resp = httpx.Response(400, json={"message": "organs mismatch", "echo": KEY})
+    with pytest.raises(SpecialistError) as e:
+        PlantNetProvider(S(plantnet_api_key=KEY), Rec(resp).transport).identify(IMG, "image/jpeg")
+    routing._failed(routing.Evidence(), "plantnet", "identify", e.value)
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "configuration or request problem" in text and "organs mismatch" in text and KEY not in text
+
+
+def test_pl_ntnet_result_is_normalised_into_the_kindwise_to_gemini_pipeline(monkeypatch):
+    """Real adapter (mocked HTTP) -> Evidence -> Gemini prompt, for a high-confidence image: Pl@ntNet, then Kindwise, then Gemini."""
+    from app.ai.specialists import registry
+    from app.services import routing
+    saved = (dict(registry._IDENTIFIERS), dict(registry._DIAGNOSERS))
+    s = S(plantnet_api_key=KEY, kindwise_api_key=KEY + "k")
+    registry._IDENTIFIERS.clear(); registry._DIAGNOSERS.clear()
+    registry.register_identifier("plantnet", lambda st: PlantNetProvider(st, httpx.MockTransport(strict_plantnet)))
+    registry.register_diagnoser("kindwise", lambda st: KindwiseProvider(st, httpx.MockTransport(lambda r: js(201, KW_OK))))
+    try:
+        stages = []
+        ev = routing.gather(routing.decide({"confidence": 0.95}, s), IMG, "image/jpeg", s, stages.append)
+        assert stages == ["identify", "disease"] and ev.steps_done == ["identify", "disease"]
+        assert [p["status"] for p in ev.providers] == ["ok", "ok"] and ev.plants[0].name == "French rose" and ev.diseases[0].name == "early blight"
+        from app.ai import prompts
+        req, _ = prompts.build_request({"classification_type": "DISEASE", "crop": "Tomato", "disease": "Early Blight", "confidence": 0.95}, b"x", "image/jpeg", ev.internal())
+        assert "Possible plant: French rose" in req.prompt and "Possible conditions: early blight" in req.prompt
+    finally:
+        registry._IDENTIFIERS.clear(); registry._DIAGNOSERS.clear(); registry._IDENTIFIERS.update(saved[0]); registry._DIAGNOSERS.update(saved[1])

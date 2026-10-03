@@ -1,4 +1,6 @@
 """Shared HTTP plumbing: sanitised errors (URLs can carry API keys, so exception text is never forwarded)."""
+import re
+
 import httpx
 
 from app.ai.specialists.base import SpecialistError
@@ -21,7 +23,8 @@ def call(method: str, url: str, *, timeout: float, transport: httpx.BaseTranspor
         raise SpecialistError("rate_limited", "HTTP 429")
     if r.status_code >= 500:
         raise SpecialistError("unavailable", f"HTTP {r.status_code}")
-    raise SpecialistError("bad_response", f"HTTP {r.status_code}")
+    snippet = re.sub(r"\s+", " ", r.text or "")[:160]                       # what the provider said, truncated; the caller redacts secrets before logging
+    raise SpecialistError("bad_response", f"HTTP {r.status_code} {r.headers.get('content-type', '?').split(';')[0]} {snippet!r}")
 
 
 def json_of(r: httpx.Response) -> dict:

@@ -1,5 +1,7 @@
 """Pl@ntNet plant identification: POST {base}/v2/identify/all?api-key=KEY, multipart `images` + `organs` (https://my.plantnet.org/doc/api/identify).
-The key travels in the query string (that is how Pl@ntNet authenticates), so errors never echo the URL."""
+`organs` is sent ONCE, as a form field (one value for the one image). Sending it a second time in the query string makes the organs list longer than the
+images list, which Pl@ntNet rejects with a 400 (our `bad_response`). The key travels in the query string (that is how Pl@ntNet authenticates), so
+errors never echo the URL."""
 import httpx
 
 from app.ai.specialists import http
@@ -22,7 +24,7 @@ class PlantNetProvider(PlantIdentifier):
             raise SpecialistError("not_configured")
         r = http.call(
             "POST", f"{self._s.plantnet_base_url.rstrip('/')}/v2/identify/all", timeout=self._s.specialist_timeout_seconds, transport=self._transport,
-            allow=(404,), params={"api-key": key, "nb-results": 3, "organs": "auto"},
+            allow=(404,), params={"api-key": key, "nb-results": 3},
             files=[("images", ("plant.jpg", image, mime or "image/jpeg"))], data={"organs": "auto"},
         )
         if r.status_code == 404:                      # "species not found": nothing recognisable as a plant

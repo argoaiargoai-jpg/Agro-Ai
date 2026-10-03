@@ -60,7 +60,10 @@ def _failed(ev: Evidence, name: str, step: str, exc: SpecialistError) -> None:
     if exc.kind in AVAILABILITY_FAILURES:
         log.warning("%s (%s) unavailable: %s; falling back", name, step, exc.kind)
     else:
-        log.error("%s (%s) failed with %s: this looks like a configuration or request problem (check its key/URL); skipping it", name, step, exc.kind)
+        from app.ai.safety import redact
+        from app.core.config import get_settings
+        log.error("%s (%s) failed with %s: this looks like a configuration or request problem (check its key/URL); skipping it. Provider said: %s",
+                  name, step, exc.kind, redact(exc.detail, get_settings().secret_values()))
 
 
 def _identify(ev: Evidence, settings: Settings, image: bytes, mime: str, on_stage) -> bool:
