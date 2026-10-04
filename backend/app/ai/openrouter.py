@@ -125,7 +125,11 @@ class OpenRouterProvider(AIProvider):
                           usage={"prompt_tokens": u.get("prompt_tokens"), "output_tokens": u.get("completion_tokens")})
 
     def ping(self) -> dict:
-        raise ProviderNotConfigured("OpenRouter is a fallback only and has no connection test")
+        """Tiny text-only request (free route) for the admin 'Test connection' button."""
+        t0 = time.perf_counter()
+        r = self.analyze(AIRequest(system_instruction="Reply with JSON only.", prompt='Return exactly {"ok": true}.',
+                                   json_schema={"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}))
+        return {"ok": bool(r.data.get("ok")), "latency_ms": round((time.perf_counter() - t0) * 1000), "model": r.model}
 
 
 _factory: Callable[[Settings], OpenRouterProvider] = lambda s: OpenRouterProvider(s)

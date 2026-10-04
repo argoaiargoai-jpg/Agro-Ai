@@ -224,6 +224,10 @@ const AI_STATE = {
   disabled: { tone: 'gray', label: 'Disabled', text: 'AI guidance is switched off. Analyses show only our model\'s result.' },
   unknown_provider: { tone: 'err', label: 'Unknown provider', text: 'The saved provider is not available in this version. Pick another one.' },
 }
+const PROVIDER_STATE = {
+  primary: { tone: 'ok', label: 'Primary' }, available: { tone: 'gray', label: 'Available' }, not_configured: { tone: 'warn', label: 'Not configured' },
+  disabled: { tone: 'gray', label: 'AI guidance off' }, bypassed: { tone: 'warn', label: 'Bypassed (test mode)' }, test_mode: { tone: 'warn', label: 'Test mode active' },
+}
 const TEST_TEXT = { ready: 'Connection works', not_configured: 'No API key configured', timeout: 'Timed out', rate_limited: 'Rate limited', unavailable: 'Provider unavailable',
   misconfigured: 'Key or model rejected', bad_response: 'Unexpected answer', blocked: 'Blocked by provider' }
 
@@ -231,8 +235,8 @@ function AITab() {
   const toast = useToast()
   const { data, loading, error, reload } = useAsync(() => api.get('/admin/ai'))
   const [busy, setBusy] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [test, setTest] = useState(null)
+  const [test, setTest] = useState({})                      // connection-test result per provider id
+  const [testingId, setTestingId] = useState(null)
   const [confirmTest, setConfirmTest] = useState(false)
   if (error) return <div className="card"><ErrorState message={errorMessage(error)} onRetry={reload} /></div>
   if (loading && !data) return <div className="card card-pad"><Skeleton h={260} /></div>
@@ -240,13 +244,13 @@ function AITab() {
 
   async function save(patch) {
     setBusy(true)
-    try { await api.put('/admin/ai', patch); toast('AI settings saved.'); setTest(null); reload() }
+    try { await api.put('/admin/ai', patch); toast('AI settings saved.'); setTest({}); reload() }
     catch (e) { toast(errorMessage(e), 'error') } finally { setBusy(false) }
   }
-  async function runTest() {
-    setTesting(true); setTest(null)
-    try { setTest(await api.post('/admin/ai/test', { provider: data.active_provider })) }
-    catch (e) { setTest({ ok: false, state: 'error', message: errorMessage(e) }) } finally { setTesting(false) }
+  async function runTest(id) {                                  // only on click: opening this page never calls a provider
+    setTestingId(id); setTest((t) => ({ ...t, [id]: null }))
+    try { const r = await api.post('/admin/ai/test', { provider: id }); setTest((t) => ({ ...t, [id]: r })) }
+    catch (e) { setTest((t) => ({ ...t, [id]: { ok: false, state: 'error', message: errorMessage(e) } })) } finally { setTestingId(null) }
   }
   const L = data.limits
   return (
@@ -263,28 +267,38 @@ function AITab() {
           <select id="ai-provider" className="select input" value={data.active_provider} disabled={busy} onChange={(e) => save({ provider: e.target.value })}>
             {data.providers.map((p) => <option key={p.name} value={p.name}>{p.display_name}{p.configured ? '' : ' (no key)'}</option>)}
           </select>
+          <p className="small muted" style={{ marginTop: 6 }}>This selects the main AI provider for the AI verification &amp; guidance step. It is not the whole workflow: the application also uses specialist providers before that step and a fallback after it (see Providers below), and the routing decides which one is used for each analysis.</p>
         </div>
       </div>
 
-      <div className="card card-pad" style={{ display: 'grid', gap: 12 }}>
+      <div className="card card-pad" style={{ display: 'grid', gap: 12 }} data-testid="workflow-providers">
         <h3 style={{ fontSize: 16 }}>Providers</h3>
-        {data.providers.map((p) => (
-          <div key={p.name} className={`prov${p.name === data.active_provider ? ' active' : ''}`}>
-            <Bot size={22} />
-            <div className="grow"><strong>{p.display_name}</strong><span className="small muted">Model: {p.model}</span></div>
-            <span className={`badge ${p.configured ? 'ok' : 'warn'}`}>{p.configured ? <><KeyRound size={13} /> Key set on server</> : 'No key on server'}</span>
-            {p.name === data.active_provider && <span className="badge dark">Active</span>}
-          </div>
-        ))}
-        <p className="small muted">API keys are read from the server environment (for Gemini: <code>GEMINI_API_KEY_1</code> and <code>GEMINI_API_KEY_2</code>). They are never stored in the database, returned by the API, or shown here.</p>
-        <div><Button variant="secondary" size="sm" loading={testing} onClick={runTest}>Test connection</Button></div>
-        {test && (
-          <Alert tone={test.ok ? 'success' : 'error'} data-testid="ai-test-result">
-            <strong>{test.ok ? <>Connection works</> : (TEST_TEXT[test.state] || 'Test failed')}</strong>
-            <div className="small" style={{ marginTop: 4 }}>{test.message}{test.latency_ms ? ` · ${test.latency_ms} ms` : ''}{test.model ? ` · ${test.model}` : ''}</div>
-            {test.detail && <div className="small muted" style={{ marginTop: 4 }}>Detail: {test.detail}</div>}
-          </Alert>
-        )}
+        <p className="small muted">The analysis workflow uses all of these. A configured key makes a provider <b>available</b>; routing decides when each one is called. Only the selected main AI provider is marked primary.</p>
+        {data.workflow.map((p) => {
+          const stt = PROVIDER_STATE[p.state] || PROVIDER_STATE.available
+          const t = test[p.id]
+          return (
+            <div key={p.id} className={`prov${p.state === 'primary' ? ' active' : ''}`} data-testid={`provider-${p.id}`} style={{ flexWrap: 'wrap' }}>
+              <Bot size={22} />
+              <div className="grow"><strong>{p.name}</strong><div className="small muted">{p.purpose}</div>{p.model && <div className="small muted">Model: {p.model}</div>}</div>
+              <span className={`badge ${p.configured ? 'ok' : 'warn'}`}>{p.configured ? <><KeyRound size={13} /> {p.keys ? `${p.keys.configured} of ${p.keys.of} keys set on server` : 'API key set on server'}</> : 'No API key on server'}</span>
+              <span className={`badge ${stt.tone}`}>{stt.label}</span>
+              {p.testable
+                ? <Button variant="secondary" size="sm" loading={testingId === p.id} disabled={!p.configured || !!testingId} onClick={() => runTest(p.id)}>Test connection</Button>
+                : <span className="small muted" style={{ flexBasis: '100%' }}>No connection test: a test would use this provider's quota or credits.</span>}
+              {t && (
+                <div style={{ flexBasis: '100%' }}>
+                  <Alert tone={t.ok ? 'success' : 'error'} data-testid="ai-test-result">
+                    <strong>{t.ok ? 'Connection works' : (TEST_TEXT[t.state] || 'Test failed')}</strong>
+                    <div className="small" style={{ marginTop: 4 }}>{t.message}{t.latency_ms ? ` · ${t.latency_ms} ms` : ''}{t.model ? ` · ${t.model}` : ''}</div>
+                    {t.detail && <div className="small muted" style={{ marginTop: 4 }}>Detail: {t.detail}</div>}
+                  </Alert>
+                </div>
+              )}
+            </div>
+          )
+        })}
+        <p className="small muted">API keys are read from the server environment (<code>GEMINI_API_KEY_1</code>, <code>GEMINI_API_KEY_2</code>, <code>KINDWISE_API_KEY</code>, <code>PLANTNET_API_KEY</code>, <code>OPENROUTER_API_KEY</code>). They are never stored in the database, returned by the API, or shown here. Opening this page does not call any provider.</p>
       </div>
 
       <div className="card card-pad" style={{ display: 'grid', gap: 12, borderLeft: '4px solid var(--warning)', background: data.openrouter_test_mode ? 'var(--warning-bg)' : undefined }} data-testid="openrouter-test-mode">
