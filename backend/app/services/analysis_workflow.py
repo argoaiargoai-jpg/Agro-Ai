@@ -136,22 +136,26 @@ def _validated(response) -> AIAnalysis:
 
 
 def _openrouter_attempt(request, evidence: routing.Evidence, settings: Settings, record_missing: bool = False):
-    """ONE OpenRouter attempt with the same request Gemini would get. Returns (AIAnalysis | None, provider). Records the outcome for the admin."""
+    """ONE OpenRouter attempt with the same request Gemini would get. Returns (AIAnalysis | None, provider, error | None, routed_model | None).
+    Records the outcome for the admin."""
     fallback = openrouter.build(settings)
     if not fallback.is_configured():
+        err = ProviderNotConfigured("OPENROUTER_API_KEY is not set on the server")
         if record_missing:
             evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": "not_configured"})
-        return None, fallback
+            log.error("OpenRouter test mode: %s, so OpenRouter cannot be called", err.detail)
+        return None, fallback, err, None
     try:
-        ai = _validated(fallback.analyze(request))
+        response = fallback.analyze(request)
+        ai = _validated(response)
     except ProviderError as exc2:
         evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": exc2.ai_status})
         from app.ai.safety import redact
         log.warning("OpenRouter fallback failed (%s): %s; using the latest specialist result if there is one", exc2.ai_status,
                     redact(exc2.detail, settings.secret_values()))
-        return None, fallback
+        return None, fallback, exc2, None
     evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": "ok"})
-    return ai, fallback
+    return ai, fallback, None, response.model
 
 
 def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Settings, on_stage=None, openrouter_test: bool = False) -> tuple[AIAnalysis | None, AnalysisReport, str, dict]:
@@ -169,15 +173,17 @@ def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Setting
     if openrouter_test:                              # ADMIN TEST MODE: Gemini is bypassed; the existing OpenRouter adapter gets the request (once)
         log.warning("OpenRouter test mode enabled: bypassing Gemini")
         evidence.providers.append({"provider": provider.name, "step": "guidance", "status": "bypassed_test_mode"})
-        ai, fb = _openrouter_attempt(request, evidence, settings, record_missing=True)
+        ai, fb, err, routed = _openrouter_attempt(request, evidence, settings, record_missing=True)
         info.update(test_mode=True, specialists=evidence.internal())
         if ai is not None:
-            info.update(plan_done=evidence.steps_done + ["guidance"], ai_used={"provider": "openrouter", "model": fb.model})
+            info.update(plan_done=evidence.steps_done + ["guidance"], ai_used={"provider": "openrouter", "model": routed or fb.model})
             return ai, build_report(ml, ai), case, info
+        info["ai_attempted"] = {"provider": "openrouter", "model": fb.model}              # admin: what was actually tried in test mode (not Gemini)
         report = specialist_report(ml, evidence)
         if report is None:
-            raise ProviderUnavailable("OpenRouter test mode: no AI answer and no specialist result")
-        return None, report, "SPECIALIST_ONLY", {**info, "gemini_error": "bypassed_test_mode", "gemini_error_class": "OpenRouterTestMode"}
+            raise err                                                                      # the real OpenRouter error: existing preliminary result + Retry
+        # the recorded AI status is OpenRouter's real outcome (not "bypassed"): the admin must see WHY it did not answer
+        return None, report, "SPECIALIST_ONLY", {**info, "gemini_error": err.ai_status, "gemini_error_class": type(err).__name__}
     try:
         if not provider.is_configured():
             raise ProviderNotConfigured("no key configured for the AI provider")
@@ -191,7 +197,7 @@ def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Setting
         ai = _validated(response)
     except ProviderError as exc:
         evidence.providers.append({"provider": provider.name, "step": "guidance", "status": exc.ai_status})
-        ai, fallback = _openrouter_attempt(request, evidence, settings)            # both Gemini keys failed: ONE OpenRouter attempt, same image and prompt
+        ai, fallback, _err, _model = _openrouter_attempt(request, evidence, settings)            # both Gemini keys failed: ONE OpenRouter attempt, same image and prompt
         if ai is not None:
             log.warning("AI guidance came from the OpenRouter fallback because Gemini failed (%s)", exc.ai_status)
             info.update(plan_done=evidence.steps_done + ["guidance"], specialists=evidence.internal(), ai_used={"provider": "openrouter", "model": fallback.model})

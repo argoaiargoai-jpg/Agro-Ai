@@ -164,3 +164,59 @@ def test_f_no_key_in_any_admin_or_customer_response_or_log(client, admin_auth, u
     bodies += [r.text, ra.text, client.get(f"{V}/analyses/{aid}", headers=admin_auth).text]
     assert all(ORKEY not in b and K1 not in b and K2 not in b for b in bodies) and ORKEY not in caplog.text
     assert not re.search(r"openrouter|gemini|kindwise|plantnet", r.text, re.I)                      # customer response stays provider-neutral
+
+
+# ----------------------------------------------------------------------------------------------- regression: the branch must reach OpenRouter and report ITS outcome
+def test_regression_success_records_openrouter_as_the_provider_with_the_routed_model_and_a_complete_stage(client, admin_auth, world):
+    set_mode(client, admin_auth, True)
+    aid, r = analyze(client, admin_auth)
+    full = client.get(f"{V}/analyses/{aid}", headers=admin_auth).json()
+    assert world["gemini"].calls == [] and len(world["or"].requests) == 1
+    assert full["ai_status"] == "completed" and full["ai_provider"] == "openrouter" and full["ai_model"] == "free/vision-model"      # the model OpenRouter actually routed to
+    assert full["result"]["stage"] == "complete" and full["result"]["ai"]["plant"] == "Rice" and full["result"]["ai_error"] is None
+    assert full["result"]["final"]["headline"] == "Rice — Rice Blast" and full["result"]["test_mode"] == "openrouter"
+
+
+@pytest.mark.parametrize("failure,status", [(httpx.Response(200, text="junk"), "bad_response"), (httpx.Response(429, json={"error": {"code": 429, "message": "x"}}), "rate_limited"),
+                                            (httpx.Response(503, json={}), "unavailable"), (httpx.Response(401, json={"error": {"code": 401, "message": "k"}}), "misconfigured")])
+def test_regression_failure_reports_openrouters_real_error_not_bypassed(client, admin_auth, world, failure, status):
+    set_mode(client, admin_auth, True)
+    world["or"].response = failure
+    aid, r = analyze(client, admin_auth)
+    full = client.get(f"{V}/analyses/{aid}", headers=admin_auth).json()
+    assert full["status"] == "completed" and full["result"]["stage"] == "specialist_only" and full["result"]["final"]["headline"] == "Tomato — Early Blight"
+    assert full["ai_status"] == status and full["result"]["ai_error"]["code"] == status and "bypassed" not in json.dumps(full["result"]["ai_error"])
+    assert full["ai_provider"] == "openrouter"                                                  # what was actually tried, not Gemini
+    assert world["gemini"].calls == [] and len(world["or"].requests) == 1                        # Gemini never called; OpenRouter called once
+    provs = full["result"]["specialists"]["providers"]
+    assert {"provider": "openrouter", "step": "guidance", "status": status} in provs and {"provider": "gemini", "step": "guidance", "status": "bypassed_test_mode"} in provs
+
+
+def test_regression_a_missing_openrouter_key_is_reported_as_not_configured_and_logged(client, admin_auth, world, settings, monkeypatch, caplog):
+    caplog.set_level(logging.WARNING)
+    monkeypatch.setattr(settings, "openrouter_api_key", SecretStr(""))
+    set_mode(client, admin_auth, True)
+    aid, _ = analyze(client, admin_auth)
+    full = client.get(f"{V}/analyses/{aid}", headers=admin_auth).json()
+    assert full["ai_status"] == "not_configured" and full["ai_provider"] == "openrouter" and world["gemini"].calls == [] and world["or"].requests == []
+    assert "OpenRouter test mode: OPENROUTER_API_KEY is not set on the server" in caplog.text
+
+
+def test_regression_no_specialist_result_keeps_the_preliminary_result_with_the_real_error(client, admin_auth, user_auth, world):
+    set_mode(client, admin_auth, True)
+    specialists._IDENTIFIERS.clear(); specialists._DIAGNOSERS.clear()
+    world["or"].response = httpx.Response(200, text="junk")
+    _, r = analyze(client, user_auth)
+    b = r.json()
+    assert b["status"] == "partial" and b["result"]["final"] is None and b["result"]["ai_error"]["retryable"] is True and b["ai_status"] == "bad_response"
+    assert world["gemini"].calls == [] and len(world["or"].requests) == 1
+
+
+def test_regression_the_e73e282_diagnostics_are_still_logged_and_secrets_stay_out(client, admin_auth, world, caplog):
+    caplog.set_level(logging.WARNING)
+    set_mode(client, admin_auth, True)
+    world["or"].response = httpx.Response(200, json={"model": "routed/model:free", "choices": [{"finish_reason": "length", "message": {"content": "nope " + ORKEY}}]})
+    aid, ra = analyze(client, admin_auth)
+    assert "OpenRouter answer unusable" in caplog.text and "HTTP 200" in caplog.text and "application/json" in caplog.text
+    assert "model=routed/model:free" in caplog.text and "finish=length" in caplog.text and "nope" in caplog.text
+    assert ORKEY not in caplog.text and ORKEY not in ra.text and "base64" not in caplog.text and "data:image" not in caplog.text

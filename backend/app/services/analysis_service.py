@@ -346,6 +346,8 @@ def _ai_stage(db: Session, user: User, a: Analysis, ml: dict, image: bytes, forc
         log.warning("analysis %s: completed from the specialist result because AI guidance failed (%s)", a.id, info.get("gemini_error"))
         a.result = _result(ml, final=report.model_dump(), stage="specialist_only", case=case, plan=info["plan_done"], info=info,
                            ai_error={"code": info["gemini_error"], "message": "Detailed guidance isn't available for this analysis.", "retryable": False})
+        if info.get("ai_attempted"):                                              # test mode: the provider that was actually tried
+            a.ai_provider, a.ai_model = info["ai_attempted"]["provider"], info["ai_attempted"]["model"][:80]
         a.status, a.ai_status, a.ai_error_code = AnalysisStatus.completed.value, info["gemini_error"], info["gemini_error_class"]
         db.commit()
         return a
