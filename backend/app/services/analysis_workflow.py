@@ -14,7 +14,7 @@ import threading
 from pydantic import ValidationError
 
 from app.ai import imaging, openrouter, prompts, safety
-from app.ai.base import AIProvider, ProviderBadResponse, ProviderError, ProviderNotConfigured, ProviderRateLimited
+from app.ai.base import AIProvider, ProviderBadResponse, ProviderError, ProviderNotConfigured, ProviderRateLimited, ProviderUnavailable
 from app.ai.schemas import AIAnalysis, AnalysisReport, Disagreement
 from app.core.config import Settings
 from app.services import routing
@@ -135,7 +135,26 @@ def _validated(response) -> AIAnalysis:
         raise ProviderBadResponse("answer did not match the schema: " + "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in exc.errors()[:4])) from exc
 
 
-def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Settings, on_stage=None) -> tuple[AIAnalysis | None, AnalysisReport, str, dict]:
+def _openrouter_attempt(request, evidence: routing.Evidence, settings: Settings, record_missing: bool = False):
+    """ONE OpenRouter attempt with the same request Gemini would get. Returns (AIAnalysis | None, provider). Records the outcome for the admin."""
+    fallback = openrouter.build(settings)
+    if not fallback.is_configured():
+        if record_missing:
+            evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": "not_configured"})
+        return None, fallback
+    try:
+        ai = _validated(fallback.analyze(request))
+    except ProviderError as exc2:
+        evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": exc2.ai_status})
+        from app.ai.safety import redact
+        log.warning("OpenRouter fallback failed (%s): %s; using the latest specialist result if there is one", exc2.ai_status,
+                    redact(exc2.detail, settings.secret_values()))
+        return None, fallback
+    evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": "ok"})
+    return ai, fallback
+
+
+def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Settings, on_stage=None, openrouter_test: bool = False) -> tuple[AIAnalysis | None, AnalysisReport, str, dict]:
     """Our model's confidence picks the specialist path (routing.py); then Gemini ALWAYS gets the ORIGINAL image, our model's result as a hint and
     whatever evidence the specialists produced. If Gemini fails (both keys), ONE OpenRouter attempt follows (same request); if that fails too, the latest
     successful specialist result is returned as the final result (ai is None then); with no specialist result the ProviderError propagates (existing behaviour: preliminary result + retry).
@@ -147,6 +166,18 @@ def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Setting
     info = {"route": route, "plan_done": list(evidence.steps_done), "specialists": evidence.internal()}
     if on_stage:
         on_stage("guidance")
+    if openrouter_test:                              # ADMIN TEST MODE: Gemini is bypassed; the existing OpenRouter adapter gets the request (once)
+        log.warning("OpenRouter test mode enabled: bypassing Gemini")
+        evidence.providers.append({"provider": provider.name, "step": "guidance", "status": "bypassed_test_mode"})
+        ai, fb = _openrouter_attempt(request, evidence, settings, record_missing=True)
+        info.update(test_mode=True, specialists=evidence.internal())
+        if ai is not None:
+            info.update(plan_done=evidence.steps_done + ["guidance"], ai_used={"provider": "openrouter", "model": fb.model})
+            return ai, build_report(ml, ai), case, info
+        report = specialist_report(ml, evidence)
+        if report is None:
+            raise ProviderUnavailable("OpenRouter test mode: no AI answer and no specialist result")
+        return None, report, "SPECIALIST_ONLY", {**info, "gemini_error": "bypassed_test_mode", "gemini_error_class": "OpenRouterTestMode"}
     try:
         if not provider.is_configured():
             raise ProviderNotConfigured("no key configured for the AI provider")
@@ -160,22 +191,11 @@ def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Setting
         ai = _validated(response)
     except ProviderError as exc:
         evidence.providers.append({"provider": provider.name, "step": "guidance", "status": exc.ai_status})
-        used = None
-        fallback = openrouter.build(settings)
-        if fallback.is_configured():                  # both Gemini keys failed: ONE OpenRouter attempt with the same image and prompt
-            try:
-                ai = _validated(fallback.analyze(request))
-            except ProviderError as exc2:
-                evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": exc2.ai_status})
-                from app.ai.safety import redact
-                log.warning("OpenRouter fallback failed (%s): %s; using the latest specialist result if there is one", exc2.ai_status,
-                            redact(exc2.detail, settings.secret_values()))
-            else:
-                evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": "ok"})
-                log.warning("AI guidance came from the OpenRouter fallback because Gemini failed (%s)", exc.ai_status)
-                used = {"provider": "openrouter", "model": fallback.model}
-                info.update(plan_done=evidence.steps_done + ["guidance"], specialists=evidence.internal(), ai_used=used)
-                return ai, build_report(ml, ai), case, info
+        ai, fallback = _openrouter_attempt(request, evidence, settings)            # both Gemini keys failed: ONE OpenRouter attempt, same image and prompt
+        if ai is not None:
+            log.warning("AI guidance came from the OpenRouter fallback because Gemini failed (%s)", exc.ai_status)
+            info.update(plan_done=evidence.steps_done + ["guidance"], specialists=evidence.internal(), ai_used={"provider": "openrouter", "model": fallback.model})
+            return ai, build_report(ml, ai), case, info
         info["specialists"] = evidence.internal()
         report = specialist_report(ml, evidence)
         if report is None:

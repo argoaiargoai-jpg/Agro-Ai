@@ -233,6 +233,7 @@ function AITab() {
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
   const [test, setTest] = useState(null)
+  const [confirmTest, setConfirmTest] = useState(false)
   if (error) return <div className="card"><ErrorState message={errorMessage(error)} onRetry={reload} /></div>
   if (loading && !data) return <div className="card card-pad"><Skeleton h={260} /></div>
   const st = AI_STATE[data.state] || AI_STATE.not_configured
@@ -285,6 +286,30 @@ function AITab() {
           </Alert>
         )}
       </div>
+
+      <div className="card card-pad" style={{ display: 'grid', gap: 12, borderLeft: '4px solid var(--warning)', background: data.openrouter_test_mode ? 'var(--warning-bg)' : undefined }} data-testid="openrouter-test-mode">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span className="badge warn">TEST / ADMIN ONLY</span>
+          <h3 style={{ fontSize: 16, margin: 0 }}>AI Provider Testing</h3>
+        </div>
+        <div className="setting-row" style={{ paddingTop: 0 }}>
+          <div className="grow"><strong>OpenRouter Test Mode</strong>
+            <span className="small muted">⚠ When enabled, Gemini will be bypassed for testing and the AI enrichment request will be sent directly to OpenRouter. The model and specialists still run first. Turn it off again after testing.</span></div>
+          <Switch label="OpenRouter Test Mode" checked={!!data.openrouter_test_mode} disabled={busy}
+            onChange={(v) => (v ? setConfirmTest(true) : save({ openrouter_test_mode: false }))} />
+        </div>
+        <div data-testid="openrouter-test-status" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span className={`badge ${data.openrouter_test_mode ? 'warn' : 'ok'}`}>{data.openrouter_test_mode ? '● OpenRouter Test Mode Active' : '● Normal Mode'}</span>
+          <span className="small muted">OpenRouter key: {data.openrouter?.configured ? 'set on server' : 'not set on server'} · model {data.openrouter?.model}</span>
+        </div>
+        {data.openrouter_test_mode && !data.openrouter?.configured && <Alert tone="warn">Test mode is on but no OpenRouter key is set on the server, so every analysis will fall back to the specialist result.</Alert>}
+      </div>
+      {confirmTest && (
+        <Modal title="Enable OpenRouter Test Mode?" onClose={() => setConfirmTest(false)}
+          actions={<><Button variant="secondary" onClick={() => setConfirmTest(false)}>Cancel</Button><Button loading={busy} onClick={async () => { await save({ openrouter_test_mode: true }); setConfirmTest(false) }}>Enable test mode</Button></>}>
+          <p className="muted">Gemini will be bypassed for every new analysis until you turn this off. Real users' analyses will use the free OpenRouter route instead. Use it for a short test only.</p>
+        </Modal>
+      )}
 
       <div className="card card-pad" style={{ display: 'grid', gap: 12 }}>
         <h3 style={{ fontSize: 16 }}>Safeguards</h3>

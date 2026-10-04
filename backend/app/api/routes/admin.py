@@ -57,7 +57,7 @@ def ai_overview(db: Session = Depends(get_db)):
 
 @router.put("/ai")
 def ai_update(body: AIConfigIn, actor: User = Depends(require_admin), db: Session = Depends(get_db)):
-    return ai_admin_service.update(db, actor.id, body.enabled, body.provider)
+    return ai_admin_service.update(db, actor.id, body.enabled, body.provider, body.openrouter_test_mode)
 
 
 @router.post("/ai/test")

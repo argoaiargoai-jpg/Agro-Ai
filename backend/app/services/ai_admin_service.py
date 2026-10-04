@@ -31,6 +31,8 @@ def overview(db: Session) -> dict:
                             .group_by(Analysis.ai_status)).all())
     return {
         "enabled": enabled, "active_provider": active, "state": state, "providers": providers,
+        "openrouter_test_mode": bool(settings_service.get_value(db, "openrouter_test_mode")),
+        "openrouter": {"configured": bool(s.openrouter_api_key.get_secret_value().strip()), "model": s.openrouter_model},          # never the key
         "secret_source": "environment",          # keys are set in the server environment, never through the UI or database
         "limits": {"timeout_seconds": s.ai_timeout_seconds, "max_retries": s.ai_max_retries, "max_concurrency": s.ai_max_concurrency,
                    "user_hourly_limit": s.ai_user_hourly_limit, "max_image_side_px": s.ai_max_image_side},
@@ -38,8 +40,10 @@ def overview(db: Session) -> dict:
     }
 
 
-def update(db: Session, actor_id: uuid.UUID, enabled: bool | None, provider: str | None) -> dict:
+def update(db: Session, actor_id: uuid.UUID, enabled: bool | None, provider: str | None, openrouter_test_mode: bool | None = None) -> dict:
     values = {}
+    if openrouter_test_mode is not None:
+        values["openrouter_test_mode"] = openrouter_test_mode
     if enabled is not None:
         values["ai_enabled"] = enabled
     if provider is not None:

@@ -269,6 +269,8 @@ def _result(ml, ai=None, final=None, ai_error=None, stage="ml_done", case=None, 
            "prompt_version": analysis_workflow.prompts.PROMPT_VERSION, "ai_case": case}
     if info:
         out["route"], out["specialists"] = info.get("route"), info.get("specialists")
+        if info.get("test_mode"):
+            out["test_mode"] = "openrouter"                                    # admin/debug only: this analysis went through OpenRouter Test Mode
     return out
 
 
@@ -335,7 +337,8 @@ def _ai_stage(db: Session, user: User, a: Analysis, ml: dict, image: bytes, forc
         a.result = {**cur, "stage": name, "plan": plan}
         db.commit()
     try:
-        ai, report, case, info = analysis_workflow.run_guidance(provider, ml, image, settings, on_stage)
+        ai, report, case, info = analysis_workflow.run_guidance(provider, ml, image, settings, on_stage,
+                                                                openrouter_test=bool(settings_service.get_value(db, "openrouter_test_mode")))
     except ProviderError as exc:
         log.warning("analysis %s: AI guidance failed (%s): %s", a.id, exc.ai_status, exc.detail)
         return _guidance_failed(db, a, ml, exc.ai_status, exc.user_message, exc.retryable, exc.retry_after, type(exc).__name__)
