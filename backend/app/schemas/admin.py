@@ -24,7 +24,7 @@ class SettingsUpdateIn(BaseModel):
 class AIConfigIn(BaseModel):
     enabled: StrictBool | None = None
     provider: str | None = None
-    openrouter_test_mode: StrictBool | None = None            # ADMIN TEST SWITCH: bypass Gemini, send the AI request to OpenRouter
+    generative_ai_bypass_gemini: StrictBool | None = None      # ADMIN TEST SWITCH: skip Gemini; Groq -> Pollinations -> specialist result
 
 
 class AITestIn(BaseModel):

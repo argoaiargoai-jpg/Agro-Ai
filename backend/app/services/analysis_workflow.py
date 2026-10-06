@@ -13,7 +13,7 @@ import threading
 
 from pydantic import ValidationError
 
-from app.ai import imaging, openrouter, prompts, safety
+from app.ai import groq, imaging, pollinations, prompts, safety
 from app.ai.base import AIProvider, ProviderBadResponse, ProviderError, ProviderNotConfigured, ProviderRateLimited, ProviderUnavailable
 from app.ai.schemas import AIAnalysis, AnalysisReport, Disagreement
 from app.core.config import Settings
@@ -135,34 +135,40 @@ def _validated(response) -> AIAnalysis:
         raise ProviderBadResponse("answer did not match the schema: " + "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in exc.errors()[:4])) from exc
 
 
-def _openrouter_attempt(request, evidence: routing.Evidence, settings: Settings, record_missing: bool = False):
-    """ONE OpenRouter attempt with the same request Gemini would get. Returns (AIAnalysis | None, provider, error | None, routed_model | None).
-    Records the outcome for the admin."""
-    fallback = openrouter.build(settings)
-    if not fallback.is_configured():
-        err = ProviderNotConfigured("OPENROUTER_API_KEY is not set on the server")
-        if record_missing:
-            evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": "not_configured"})
-            log.error("OpenRouter test mode: %s, so OpenRouter cannot be called", err.detail)
-        return None, fallback, err, None
-    try:
-        response = fallback.analyze(request)
-        ai = _validated(response)
-    except ProviderError as exc2:
-        evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": exc2.ai_status})
-        from app.ai.safety import redact
-        log.warning("OpenRouter fallback failed (%s): %s; using the latest specialist result if there is one", exc2.ai_status,
-                    redact(exc2.detail, settings.secret_values()))
-        return None, fallback, exc2, None
-    evidence.providers.append({"provider": "openrouter", "step": "guidance", "status": "ok"})
-    return ai, fallback, None, response.model
+def _fallback_chain(request, evidence: routing.Evidence, settings: Settings):
+    """The generative fallbacks, in order: Groq, then Pollinations. Each gets the SAME request Gemini got (same image, same prompt) and is tried
+    once (with its own bounded retries). A provider that is not configured, errors, or returns an unusable answer (empty / not JSON / not our
+    schema) counts as failed and the next one is tried. Returns (AIAnalysis | None, provider, last error | None, model | None); `provider` is the
+    one that answered, or the last one tried. Every outcome is recorded for the admin; nothing here ever contains a key."""
+    from app.ai.safety import redact
+    last_provider, last_err = None, None
+    for build in (groq.build, pollinations.build):
+        fb = build(settings)
+        last_provider = fb
+        if not fb.is_configured():
+            evidence.providers.append({"provider": fb.name, "step": "guidance", "status": "not_configured"})
+            last_err = ProviderNotConfigured(f"{fb.env_name} is not set on the server")
+            log.info("%s is not configured; skipping", fb.display_name)
+            continue
+        try:
+            response = fb.analyze(request)
+            ai = _validated(response)
+        except ProviderError as exc:
+            evidence.providers.append({"provider": fb.name, "step": "guidance", "status": exc.ai_status})
+            log.warning("%s fallback failed (%s): %s", fb.display_name, exc.ai_status, redact(exc.detail, settings.secret_values()))
+            last_err = exc
+            continue
+        evidence.providers.append({"provider": fb.name, "step": "guidance", "status": "ok"})
+        return ai, fb, None, response.model
+    return None, last_provider, last_err, None
 
 
-def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Settings, on_stage=None, openrouter_test: bool = False) -> tuple[AIAnalysis | None, AnalysisReport, str, dict]:
+def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Settings, on_stage=None, bypass_gemini: bool = False) -> tuple[AIAnalysis | None, AnalysisReport, str, dict]:
     """Our model's confidence picks the specialist path (routing.py); then Gemini ALWAYS gets the ORIGINAL image, our model's result as a hint and
-    whatever evidence the specialists produced. If Gemini fails (both keys), ONE OpenRouter attempt follows (same request); if that fails too, the latest
-    successful specialist result is returned as the final result (ai is None then); with no specialist result the ProviderError propagates (existing behaviour: preliminary result + retry).
-    Returns (ai, report, case, info); info is internal bookkeeping. `on_stage(name)` is called as each real step starts."""
+    whatever evidence the specialists produced. If Gemini fails (both keys, after their retries), Groq is tried, then Pollinations (same request); if
+    those fail too, the latest successful specialist result is returned as the final result (ai is None then); with no specialist result the
+    ProviderError propagates (existing behaviour: preliminary result + retry). With `bypass_gemini` (admin switch) Gemini is skipped and the chain
+    starts at Groq. Returns (ai, report, case, info); info is internal bookkeeping. `on_stage(name)` is called as each real step starts."""
     jpeg, mime = imaging.prepare_for_provider(image, settings.ai_max_image_side, settings.ml_max_pixels)
     route = routing.decide(ml, settings)
     evidence = routing.gather(route, jpeg, mime, settings, on_stage)         # the same re-encoded image bytes go to every visual provider
@@ -170,19 +176,18 @@ def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Setting
     info = {"route": route, "plan_done": list(evidence.steps_done), "specialists": evidence.internal()}
     if on_stage:
         on_stage("guidance")
-    if openrouter_test:                              # ADMIN TEST MODE: Gemini is bypassed; the existing OpenRouter adapter gets the request (once)
-        log.warning("OpenRouter test mode enabled: bypassing Gemini")
-        evidence.providers.append({"provider": provider.name, "step": "guidance", "status": "bypassed_test_mode"})
-        ai, fb, err, routed = _openrouter_attempt(request, evidence, settings, record_missing=True)
+    if bypass_gemini:                                # ADMIN SWITCH: Gemini is skipped; Groq -> Pollinations -> specialist result
+        log.warning("Gemini bypass enabled: skipping Gemini")
+        evidence.providers.append({"provider": provider.name, "step": "guidance", "status": "bypassed"})
+        ai, fb, err, routed = _fallback_chain(request, evidence, settings)
         info.update(test_mode=True, specialists=evidence.internal())
         if ai is not None:
-            info.update(plan_done=evidence.steps_done + ["guidance"], ai_used={"provider": "openrouter", "model": routed or fb.model})
+            info.update(plan_done=evidence.steps_done + ["guidance"], ai_used={"provider": fb.name, "model": routed or fb.model})
             return ai, build_report(ml, ai), case, info
-        info["ai_attempted"] = {"provider": "openrouter", "model": fb.model}              # admin: what was actually tried in test mode (not Gemini)
+        info["ai_attempted"] = {"provider": fb.name, "model": fb.model}                    # admin: what was actually tried (not Gemini)
         report = specialist_report(ml, evidence)
         if report is None:
-            raise err                                                                      # the real OpenRouter error: existing preliminary result + Retry
-        # the recorded AI status is OpenRouter's real outcome (not "bypassed"): the admin must see WHY it did not answer
+            raise err                                                                      # the real fallback error: existing preliminary result + Retry
         return None, report, "SPECIALIST_ONLY", {**info, "gemini_error": err.ai_status, "gemini_error_class": type(err).__name__}
     try:
         if not provider.is_configured():
@@ -197,10 +202,10 @@ def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Setting
         ai = _validated(response)
     except ProviderError as exc:
         evidence.providers.append({"provider": provider.name, "step": "guidance", "status": exc.ai_status})
-        ai, fallback, _err, _model = _openrouter_attempt(request, evidence, settings)            # both Gemini keys failed: ONE OpenRouter attempt, same image and prompt
+        ai, fallback, err, model = _fallback_chain(request, evidence, settings)                 # Gemini failed: Groq, then Pollinations
         if ai is not None:
-            log.warning("AI guidance came from the OpenRouter fallback because Gemini failed (%s)", exc.ai_status)
-            info.update(plan_done=evidence.steps_done + ["guidance"], specialists=evidence.internal(), ai_used={"provider": "openrouter", "model": fallback.model})
+            log.warning("AI guidance came from %s because Gemini failed (%s)", fallback.display_name, exc.ai_status)
+            info.update(plan_done=evidence.steps_done + ["guidance"], specialists=evidence.internal(), ai_used={"provider": fallback.name, "model": model or fallback.model})
             return ai, build_report(ml, ai), case, info
         info["specialists"] = evidence.internal()
         report = specialist_report(ml, evidence)

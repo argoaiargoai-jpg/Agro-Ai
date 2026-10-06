@@ -12,7 +12,7 @@ import time
 
 import httpx
 
-from app.ai import keyring, safety
+from app.ai import keyring, retry, safety
 from app.ai.base import (AIProvider, AIRequest, AIResponse, ProviderBadResponse, ProviderBlocked, ProviderError, ProviderMisconfigured,
                          ProviderNotConfigured, ProviderRateLimited, ProviderTimeout, ProviderUnavailable)
 from app.core.config import Settings
@@ -72,22 +72,24 @@ class GeminiProvider(AIProvider):
         return safety.redact(text, self._secrets())[:300]
 
     def _generate(self, system: str, parts: list[dict], schema: dict | None, max_tokens: int = 8192) -> AIResponse:
-        """One logical Gemini request. With two keys: the counter picks the primary key, and if it fails the SAME request is retried once on
-        the other key (2 attempts in total, never more; the counter is not incremented again). With one key the old retry policy applies."""
+        """One logical Gemini request. The counter picks the primary key; transient failures (timeout, 408, 429, 5xx) are retried on that key with
+        exponential backoff (bounded by ai_max_retries and ai_retry_budget_seconds); if the key still fails, the SAME request goes once through the
+        same policy on the other key (the counter is not incremented again). Permanent errors (400/401/403) are never retried."""
         keys = self._s.gemini_keys()
         if not keys:
             raise ProviderNotConfigured("no Gemini key configured")
         if len(keys) == 1:
             return self._call(keys, system, parts, schema, max_tokens, retries=max(self._s.ai_max_retries, 0))
+        retries = max(self._s.ai_max_retries, 0)
         first = self._select(len(keys)) % len(keys)
         order = [keys[first], keys[1 - first]]
         try:
-            r = self._call([order[0]], system, parts, schema, max_tokens, retries=0)
+            r = self._call([order[0]], system, parts, schema, max_tokens, retries=retries)
         except ProviderBlocked:
             raise                                         # a safety block is about the image: the other key would answer the same
         except ProviderError as exc:
             log.warning("Gemini primary key (slot %s) failed (%s); trying the fallback key (slot %s)", order[0][0], exc.ai_status, order[1][0])
-            r = self._call([order[1]], system, parts, schema, max_tokens, retries=0)
+            r = self._call([order[1]], system, parts, schema, max_tokens, retries=retries)
             log.info("Gemini primary key (slot %s) failed; fallback key (slot %s) succeeded", order[0][0], order[1][0])
             return r
         return r
@@ -99,6 +101,8 @@ class GeminiProvider(AIProvider):
         use_schema = schema is not None
         attempts = 1 + max(retries, 0)
         last: Exception | None = None
+        started = time.monotonic()
+        wait: int | None = None
         i = 0
         while i < attempts:
             body = {
@@ -108,6 +112,7 @@ class GeminiProvider(AIProvider):
                                      **({"responseJsonSchema": schema} if use_schema else {})},
             }
             t0 = time.perf_counter()
+            wait = None
             try:
                 with httpx.Client(timeout=httpx.Timeout(self._s.ai_timeout_seconds), transport=self._transport) as c:
                     resp = c.post(url, headers=headers, json=body)
@@ -122,23 +127,29 @@ class GeminiProvider(AIProvider):
                     return self._parse(resp, latency)
                 err_msg = self._error_message(resp)
                 log.warning("Gemini HTTP %s on key slot %s: %s", status, slot, self._safe(err_msg))
-                if status == 429:
-                    raise ProviderRateLimited(err_msg and self._safe(err_msg), retry_after=self._retry_after(resp))
                 if status in (401, 403, 404) or (status == 400 and re.search(r"api key|API_KEY|permission|not found|not supported for generateContent", err_msg, re.I)):
                     raise ProviderMisconfigured(f"HTTP {status} (key slot {slot}): {self._safe(err_msg)}")
                 if status == 400 and use_schema and re.search(r"schema|response_json_schema|responseJsonSchema|response_schema", err_msg, re.I):
                     use_schema = False            # model rejected our schema dialect: retry once relying on the prompt + our validation
                     log.warning("Gemini rejected the response schema; retrying without it")
                     continue
-                if status >= 500:
+                if status == 429:                 # transient: quota windows reopen, so back off and retry (then the other key)
+                    wait = self._retry_after(resp)
+                    last = ProviderRateLimited(err_msg and self._safe(err_msg), retry_after=wait)
+                elif status == 408:
+                    last = ProviderTimeout(f"HTTP 408 (key slot {slot})")
+                elif status >= 500:
                     last = ProviderUnavailable(f"HTTP {status}")
                 else:
                     raise ProviderBadResponse(f"HTTP {status}: {self._safe(err_msg)}")
             i += 1
-            if i < attempts:
-                _SLEEP(0.5 * 2 ** (i - 1))
+            if i < attempts and time.monotonic() - started < self._s.ai_retry_budget_seconds:
+                _SLEEP(retry.delay(i, wait))
+            else:
+                break
         assert last is not None
         raise last
+
     @staticmethod
     def _error_message(resp: httpx.Response) -> str:
         try:

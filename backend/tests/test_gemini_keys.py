@@ -134,11 +134,38 @@ def test_a_safety_block_is_not_retried_on_the_other_key():
     assert w.calls == ["K1"]
 
 
-def test_no_inner_retry_when_two_keys_exist_total_attempts_stay_at_two():
-    w = Wire({K1: ["timeout"], K2: ["timeout"]}); p = w.provider(settings(ai_max_retries=3))
+def test_transient_failures_are_retried_with_backoff_on_each_key_before_failing_over():
+    sleeps = []
+    gemini._SLEEP = lambda s: sleeps.append(s)
+    w = Wire({K1: ["timeout"], K2: ["timeout"]}); p = w.provider(settings(ai_max_retries=2))
+    with pytest.raises(ProviderTimeout):
+        p.analyze(REQ)
+    assert w.calls == ["K1", "K1", "K1", "K2", "K2", "K2"]                       # bounded: 1 + 2 attempts per key, never more
+    assert sleeps == [1.0, 2.0, 1.0, 2.0]                                          # exponential backoff between attempts
+
+
+@pytest.mark.parametrize("failure", [408, 429, 500, 502, 503, 504, "timeout"])
+def test_every_transient_failure_is_retried_then_succeeds(failure):
+    w = Wire({K1: [failure, "ok"]}); p = w.provider(settings(ai_max_retries=2))
+    assert p.analyze(REQ).data["plant_present"] is True and w.calls == ["K1", "K1"]       # recovered on the SAME key, no failover needed
+
+
+@pytest.mark.parametrize("failure", [400, 401, 403])
+def test_permanent_errors_are_never_retried_on_a_key(failure):
+    w = Wire({K1: [failure, "ok"]}); p = w.provider(settings(ai_max_retries=2))
+    p.analyze(REQ)
+    assert w.calls == ["K1", "K2"]                                                  # straight to the other key
+
+
+def test_the_retry_budget_stops_further_retries(monkeypatch):
+    w = Wire({K1: ["timeout"], K2: ["timeout"]}); p = w.provider(settings(ai_max_retries=5, ai_retry_budget_seconds=0))
     with pytest.raises(ProviderTimeout):
         p.analyze(REQ)
     assert w.calls == ["K1", "K2"]
+
+
+def test_the_default_timeout_is_120_seconds():
+    assert Settings(_env_file=None).ai_timeout_seconds == 120.0
 
 
 # ------------------------------------------------------------------------------------------------- one or no key

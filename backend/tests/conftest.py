@@ -14,6 +14,7 @@ os.environ.update(
     ADMIN_PASSWORD="AdminPass123",
     BCRYPT_ROUNDS="4",
     OTP_RESEND_COOLDOWN_SECONDS="0",
+    AI_MAX_RETRIES="0",          # one attempt per provider unless a test opts in (retry behaviour has its own tests)
     GOOGLE_CLIENT_ID="",
     GOOGLE_CLIENT_SECRET="",
 )

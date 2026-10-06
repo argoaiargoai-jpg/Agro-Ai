@@ -59,7 +59,9 @@ services:
         sync: false
       - key: GEMINI_API_KEY_2
         sync: false
-      - key: OPENROUTER_API_KEY        # optional: last-resort AI step after both Gemini keys fail (one attempt)
+      - key: GROQ_API_KEY              # optional generative fallback 1 (after Gemini fails)
+        sync: false
+      - key: POLLINATIONS_API_KEY      # optional generative fallback 2 (after Groq fails)
         sync: false
       - key: PLANTNET_API_KEY          # specialist providers (optional; skipped when unset): plant identification
         sync: false

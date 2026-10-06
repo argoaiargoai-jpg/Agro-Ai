@@ -59,16 +59,20 @@ class Settings(BaseSettings):
     gemini_api_key_2: SecretStr = SecretStr("")
     gemini_model: str = "gemini-3.8-flash"
     gemini_base_url: str = "https://generativelanguage.googleapis.com"
-    ai_timeout_seconds: float = 45.0
-    ai_max_retries: int = 1                 # extra attempts on timeouts / 5xx only (never on 429 or 4xx)
+    ai_timeout_seconds: float = 120.0       # per HTTP attempt, for Gemini, Groq and Pollinations
+    ai_max_retries: int = 2                 # extra attempts per key/provider on timeouts, 408, 429, 500, 502, 503, 504 (exponential backoff; never on other 4xx)
+    ai_retry_budget_seconds: float = 240.0  # no further retry is started once one provider call has used this much time
     ai_max_concurrency: int = 3             # simultaneous provider calls
     ai_max_image_side: int = 1568           # longest side sent to the provider (metadata is stripped by re-encoding)
     ai_user_hourly_limit: int = 30          # provider calls per user per hour
 
-    # --- OpenRouter: used only after BOTH Gemini keys failed (one attempt); free vision-capable route by default ---
-    openrouter_api_key: SecretStr = SecretStr("")
-    openrouter_model: str = "openrouter/free"
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # --- Generative fallbacks after Gemini: Groq first, then Pollinations (one provider call each, with bounded retries) ---
+    groq_api_key: SecretStr = SecretStr("")
+    groq_model: str = "qwen/qwen3.8-27b"                   # Groq vision model with JSON mode (console.groq.com/docs/vision)
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    pollinations_api_key: SecretStr = SecretStr("")
+    pollinations_model: str = "openai/gpt-5.4-nano"        # vision-capable chat model on gen.pollinations.ai
+    pollinations_base_url: str = "https://gen.pollinations.ai/v1"
 
     # --- Specialist plant/disease providers (all optional; each one that is not configured is simply skipped) ---
     plantnet_api_key: SecretStr = SecretStr("")         # plant identification (my.plantnet.org)
@@ -169,7 +173,7 @@ class Settings(BaseSettings):
     def secret_values(self) -> list[str]:
         """Every provider secret, for log redaction. Never log or return these."""
         fields = (self.gemini_api_key, self.gemini_api_key_1, self.gemini_api_key_2, self.plantnet_api_key, self.plantix_api_key,
-                  self.kindwise_api_key, self.kindwise_plant_api_key, self.brevo_api_key, self.openrouter_api_key)
+                  self.kindwise_api_key, self.kindwise_plant_api_key, self.brevo_api_key, self.groq_api_key, self.pollinations_api_key)
         return [v for v in (f.get_secret_value().strip() for f in fields) if len(v) >= 6]
 
     @property

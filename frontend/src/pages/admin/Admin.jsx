@@ -226,7 +226,7 @@ const AI_STATE = {
 }
 const PROVIDER_STATE = {
   primary: { tone: 'ok', label: 'Primary' }, available: { tone: 'gray', label: 'Available' }, not_configured: { tone: 'warn', label: 'Not configured' },
-  disabled: { tone: 'gray', label: 'AI guidance off' }, bypassed: { tone: 'warn', label: 'Bypassed (test mode)' }, test_mode: { tone: 'warn', label: 'Test mode active' },
+  disabled: { tone: 'gray', label: 'AI guidance off' }, bypassed: { tone: 'warn', label: 'Bypassed (admin switch)' }, fallback: { tone: 'gray', label: 'Fallback' },
 }
 const TEST_TEXT = { ready: 'Connection works', not_configured: 'No API key configured', timeout: 'Timed out', rate_limited: 'Rate limited', unavailable: 'Provider unavailable',
   misconfigured: 'Key or model rejected', bad_response: 'Unexpected answer', blocked: 'Blocked by provider' }
@@ -298,30 +298,30 @@ function AITab() {
             </div>
           )
         })}
-        <p className="small muted">API keys are read from the server environment (<code>GEMINI_API_KEY_1</code>, <code>GEMINI_API_KEY_2</code>, <code>KINDWISE_API_KEY</code>, <code>PLANTNET_API_KEY</code>, <code>OPENROUTER_API_KEY</code>). They are never stored in the database, returned by the API, or shown here. Opening this page does not call any provider.</p>
+        <p className="small muted">API keys are read from the server environment (<code>GEMINI_API_KEY_1</code>, <code>GEMINI_API_KEY_2</code>, <code>KINDWISE_API_KEY</code>, <code>PLANTNET_API_KEY</code>, <code>GROQ_API_KEY</code>, <code>POLLINATIONS_API_KEY</code>). They are never stored in the database, returned by the API, or shown here. Opening this page does not call any provider.</p>
       </div>
 
-      <div className="card card-pad" style={{ display: 'grid', gap: 12, borderLeft: '4px solid var(--warning)', background: data.openrouter_test_mode ? 'var(--warning-bg)' : undefined }} data-testid="openrouter-test-mode">
+      <div className="card card-pad" style={{ display: 'grid', gap: 12, borderLeft: '4px solid var(--warning)', background: data.generative_ai_bypass_gemini ? 'var(--warning-bg)' : undefined }} data-testid="bypass-gemini">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <span className="badge warn">TEST / ADMIN ONLY</span>
           <h3 style={{ fontSize: 16, margin: 0 }}>AI Provider Testing</h3>
         </div>
         <div className="setting-row" style={{ paddingTop: 0 }}>
-          <div className="grow"><strong>OpenRouter Test Mode</strong>
-            <span className="small muted">⚠ When enabled, Gemini will be bypassed for testing and the AI enrichment request will be sent directly to OpenRouter. The model and specialists still run first. Turn it off again after testing.</span></div>
-          <Switch label="OpenRouter Test Mode" checked={!!data.openrouter_test_mode} disabled={busy}
-            onChange={(v) => (v ? setConfirmTest(true) : save({ openrouter_test_mode: false }))} />
+          <div className="grow"><strong>Bypass Gemini</strong>
+            <span className="small muted">⚠ When enabled, Gemini is skipped for testing and the AI request goes to Groq, then Pollinations. The model and specialists still run first, and a failure still returns the specialist result. Turn it off again after testing.</span></div>
+          <Switch label="Bypass Gemini" checked={!!data.generative_ai_bypass_gemini} disabled={busy}
+            onChange={(v) => (v ? setConfirmTest(true) : save({ generative_ai_bypass_gemini: false }))} />
         </div>
-        <div data-testid="openrouter-test-status" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span className={`badge ${data.openrouter_test_mode ? 'warn' : 'ok'}`}>{data.openrouter_test_mode ? '● OpenRouter Test Mode Active' : '● Normal Mode'}</span>
-          <span className="small muted">OpenRouter key: {data.openrouter?.configured ? 'set on server' : 'not set on server'} · model {data.openrouter?.model}</span>
+        <div data-testid="bypass-status" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span className={`badge ${data.generative_ai_bypass_gemini ? 'warn' : 'ok'}`}>{data.generative_ai_bypass_gemini ? '● Gemini Bypassed' : '● Normal Mode'}</span>
+          <span className="small muted">Groq key: {data.fallbacks?.groq?.configured ? 'set on server' : 'not set on server'} · Pollinations key: {data.fallbacks?.pollinations?.configured ? 'set on server' : 'not set on server'}</span>
         </div>
-        {data.openrouter_test_mode && !data.openrouter?.configured && <Alert tone="warn">Test mode is on but no OpenRouter key is set on the server, so every analysis will fall back to the specialist result.</Alert>}
+        {data.generative_ai_bypass_gemini && !data.fallbacks?.groq?.configured && !data.fallbacks?.pollinations?.configured && <Alert tone="warn">Gemini is bypassed but neither Groq nor Pollinations has a key on the server, so every analysis will fall back to the specialist result.</Alert>}
       </div>
       {confirmTest && (
-        <Modal title="Enable OpenRouter Test Mode?" onClose={() => setConfirmTest(false)}
-          actions={<><Button variant="secondary" onClick={() => setConfirmTest(false)}>Cancel</Button><Button loading={busy} onClick={async () => { await save({ openrouter_test_mode: true }); setConfirmTest(false) }}>Enable test mode</Button></>}>
-          <p className="muted">Gemini will be bypassed for every new analysis until you turn this off. Real users' analyses will use the free OpenRouter route instead. Use it for a short test only.</p>
+        <Modal title="Bypass Gemini?" onClose={() => setConfirmTest(false)}
+          actions={<><Button variant="secondary" onClick={() => setConfirmTest(false)}>Cancel</Button><Button loading={busy} onClick={async () => { await save({ generative_ai_bypass_gemini: true }); setConfirmTest(false) }}>Bypass Gemini</Button></>}>
+          <p className="muted">Gemini will be skipped for every new analysis until you turn this off. Real users' analyses will use Groq (then Pollinations) instead. Use it for a short test only.</p>
         </Modal>
       )}
 

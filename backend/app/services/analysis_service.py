@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.models import Analysis, AnalysisStatus, User
-from app.ai import openrouter, registry
+from app.ai import groq, pollinations, registry
 from app.ai.base import ProviderError
 from app.core.security import utcnow
 from app.services import analysis_workflow, ml_service, routing, settings_service
@@ -270,7 +270,7 @@ def _result(ml, ai=None, final=None, ai_error=None, stage="ml_done", case=None, 
     if info:
         out["route"], out["specialists"] = info.get("route"), info.get("specialists")
         if info.get("test_mode"):
-            out["test_mode"] = "openrouter"                                    # admin/debug only: this analysis went through OpenRouter Test Mode
+            out["test_mode"] = "bypass_gemini"                                 # admin/debug only: this analysis skipped Gemini (admin switch)
     return out
 
 
@@ -314,7 +314,7 @@ def _ai_stage(db: Session, user: User, a: Analysis, ml: dict, image: bytes, forc
     except KeyError:
         return _guidance_failed(db, a, ml, "misconfigured", "Detailed guidance is temporarily unavailable.", False, None, "unknown_provider")
     a.ai_provider, a.ai_model = provider.name, provider.model
-    if not provider.is_configured() and not routing.any_specialist_configured(settings) and not openrouter.build(settings).is_configured():
+    if not provider.is_configured() and not routing.any_specialist_configured(settings) and not groq.build(settings).is_configured() and not pollinations.build(settings).is_configured():
         return _ml_only(db, a, ml, "not_configured")
     now = utcnow()
     cooldown = AI_FORCE_COOLDOWN if forced else AI_RETRY_COOLDOWN
@@ -338,7 +338,7 @@ def _ai_stage(db: Session, user: User, a: Analysis, ml: dict, image: bytes, forc
         db.commit()
     try:
         ai, report, case, info = analysis_workflow.run_guidance(provider, ml, image, settings, on_stage,
-                                                                openrouter_test=bool(settings_service.get_value(db, "openrouter_test_mode")))
+                                                                bypass_gemini=bool(settings_service.get_value(db, "generative_ai_bypass_gemini")))
     except ProviderError as exc:
         log.warning("analysis %s: AI guidance failed (%s): %s", a.id, exc.ai_status, exc.detail)
         return _guidance_failed(db, a, ml, exc.ai_status, exc.user_message, exc.retryable, exc.retry_after, type(exc).__name__)
@@ -346,12 +346,12 @@ def _ai_stage(db: Session, user: User, a: Analysis, ml: dict, image: bytes, forc
         log.warning("analysis %s: completed from the specialist result because AI guidance failed (%s)", a.id, info.get("gemini_error"))
         a.result = _result(ml, final=report.model_dump(), stage="specialist_only", case=case, plan=info["plan_done"], info=info,
                            ai_error={"code": info["gemini_error"], "message": "Detailed guidance isn't available for this analysis.", "retryable": False})
-        if info.get("ai_attempted"):                                              # test mode: the provider that was actually tried
+        if info.get("ai_attempted"):                                              # bypass mode: the fallback provider that was actually tried
             a.ai_provider, a.ai_model = info["ai_attempted"]["provider"], info["ai_attempted"]["model"][:80]
         a.status, a.ai_status, a.ai_error_code = AnalysisStatus.completed.value, info["gemini_error"], info["gemini_error_class"]
         db.commit()
         return a
-    if info.get("ai_used"):                                                       # answered by the OpenRouter fallback: record it for the admin
+    if info.get("ai_used"):                                                       # answered by a fallback provider (Groq / Pollinations): record it for the admin
         a.ai_provider, a.ai_model = info["ai_used"]["provider"], info["ai_used"]["model"][:80]
     a.result = _result(ml, ai=ai.model_dump(), final=report.model_dump(), stage="complete", case=case, plan=info["plan_done"], info=info)
     a.status, a.ai_status, a.ai_error_code, a.ai_completed_at = AnalysisStatus.completed.value, "completed", None, utcnow()

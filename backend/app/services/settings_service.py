@@ -10,7 +10,7 @@ from app.models import AuditLog, SystemSetting
 AI_DEFAULTS: dict[str, tuple[object, str]] = {
     "ai_enabled": (True, "Run external AI guidance after our ML model"),
     "ai_provider": ("gemini", "Active external AI provider"),
-    "openrouter_test_mode": (False, "ADMIN TEST: bypass Gemini and send the AI enrichment request straight to OpenRouter"),
+    "generative_ai_bypass_gemini": (False, "ADMIN TEST: skip Gemini and send the AI request to the fallback providers (Groq, then Pollinations)"),
 }
 
 # key -> (default, description, public?)
@@ -38,7 +38,7 @@ def _ai_provider_ok(v) -> bool:
 
 
 VALIDATORS["ai_enabled"] = lambda v: isinstance(v, bool)
-VALIDATORS["openrouter_test_mode"] = lambda v: isinstance(v, bool)
+VALIDATORS["generative_ai_bypass_gemini"] = lambda v: isinstance(v, bool)
 VALIDATORS["ai_provider"] = _ai_provider_ok
 
 

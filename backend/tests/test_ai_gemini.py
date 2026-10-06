@@ -111,7 +111,7 @@ def test_rate_limit_429_with_retry_after_header(settings):
     spy = Spy(httpx.Response(429, headers={"retry-after": "42"}, json={"error": {"message": "quota"}}))
     with pytest.raises(ProviderRateLimited) as e:
         provider(settings, spy).analyze(REQ)
-    assert e.value.retry_after == 42 and len(spy.requests) == 1                              # 429 is never retried
+    assert e.value.retry_after == 42 and len(spy.requests) == 2                              # 429 is transient: 1 + AI_MAX_RETRIES (=1 here) attempts
 
 
 def test_rate_limit_429_with_retryinfo_in_body(settings):
@@ -125,7 +125,7 @@ def test_5xx_is_retried_once_then_reported_unavailable(settings, _cfg):
     spy = Spy(httpx.Response(503, json={"error": {"message": "overloaded"}}))
     with pytest.raises(ProviderUnavailable):
         provider(settings, spy).analyze(REQ)
-    assert len(spy.requests) == 2 and _cfg == [0.5]                                           # 1 + AI_MAX_RETRIES attempts, with backoff
+    assert len(spy.requests) == 2 and _cfg == [1.0]                                           # 1 + AI_MAX_RETRIES attempts, with backoff
 
 
 def test_5xx_then_success_recovers(settings):
