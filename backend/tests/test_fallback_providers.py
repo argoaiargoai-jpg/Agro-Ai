@@ -34,7 +34,7 @@ REQ = AIRequest(system_instruction="sys", prompt="the prompt", json_schema={"typ
 
 ADAPTERS = [
     pytest.param(GroqProvider, "groq_api_key", GKEY, "https://api.groq.com/openai/v1/chat/completions", "qwen/qwen3.8-27b", id="groq"),
-    pytest.param(PollinationsProvider, "pollinations_api_key", PKEY, "https://gen.pollinations.ai/v1/chat/completions", "openai/gpt-5.4-nano", id="pollinations"),
+    pytest.param(PollinationsProvider, "pollinations_api_key", PKEY, "https://gen.pollinations.ai/v1/chat/completions", "openai/gpt-5.6-luna", id="pollinations"),
 ]
 
 
@@ -174,7 +174,7 @@ def test_ping_is_text_only_single_attempt_and_never_exposes_the_key(cls, field, 
 
 def test_defaults_and_secrets():
     s = Settings(_env_file=None, groq_api_key=GKEY, pollinations_api_key=PKEY)
-    assert s.groq_model == "qwen/qwen3.8-27b" and s.pollinations_model == "openai/gpt-5.4-nano" and s.ai_timeout_seconds == 120.0
+    assert s.groq_model == "qwen/qwen3.8-27b" and s.pollinations_model == "openai/gpt-5.6-luna" and s.ai_timeout_seconds == 120.0
     assert GKEY in s.secret_values() and PKEY in s.secret_values() and GKEY not in repr(s) and PKEY not in repr(s)
     assert "groq" not in registry.names() and "pollinations" not in registry.names()
 

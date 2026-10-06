@@ -35,7 +35,7 @@ def test_admin_receives_all_five_providers_with_safe_metadata(client, admin_auth
     assert w["kindwise"]["configured"] is True and w["kindwise"]["state"] == "available" and "model" not in w["kindwise"] and w["kindwise"]["testable"] is False
     assert w["plantnet"]["configured"] is True and w["plantnet"]["state"] == "available" and w["plantnet"]["purpose"] == "Plant identification specialist"
     assert w["groq"]["configured"] is True and w["groq"]["model"] == "qwen/qwen3.8-27b" and w["groq"]["state"] == "fallback" and w["groq"]["testable"] is True
-    assert w["pollinations"]["configured"] is True and w["pollinations"]["model"] == "openai/gpt-5.4-nano" and w["pollinations"]["state"] == "fallback"
+    assert w["pollinations"]["configured"] is True and w["pollinations"]["model"] == "openai/gpt-5.6-luna" and w["pollinations"]["state"] == "fallback"
     assert body["generative_ai_bypass_gemini"] is False and body["fallbacks"]["groq"]["configured"] is True
 
 

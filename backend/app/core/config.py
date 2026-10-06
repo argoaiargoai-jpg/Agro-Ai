@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     groq_model: str = "qwen/qwen3.8-27b"                   # Groq vision model with JSON mode (console.groq.com/docs/vision)
     groq_base_url: str = "https://api.groq.com/openai/v1"
     pollinations_api_key: SecretStr = SecretStr("")
-    pollinations_model: str = "openai/gpt-5.4-nano"        # vision-capable chat model on gen.pollinations.ai
+    pollinations_model: str = "openai/gpt-5.6-luna"        # ChatGPT Luna (alias chatgpt-luna): vision-capable chat model on gen.pollinations.ai
     pollinations_base_url: str = "https://gen.pollinations.ai/v1"
 
     # --- Specialist plant/disease providers (all optional; each one that is not configured is simply skipped) ---
