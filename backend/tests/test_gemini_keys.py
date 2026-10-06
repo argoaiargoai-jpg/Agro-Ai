@@ -164,8 +164,8 @@ def test_the_retry_budget_stops_further_retries(monkeypatch):
     assert w.calls == ["K1", "K2"]
 
 
-def test_the_default_timeout_is_120_seconds():
-    assert Settings(_env_file=None).ai_timeout_seconds == 120.0
+def test_the_default_timeout_is_40_seconds():
+    assert Settings(_env_file=None).ai_timeout_seconds == 40.0
 
 
 # ------------------------------------------------------------------------------------------------- one or no key

@@ -308,20 +308,20 @@ function AITab() {
         </div>
         <div className="setting-row" style={{ paddingTop: 0 }}>
           <div className="grow"><strong>Bypass Gemini</strong>
-            <span className="small muted">⚠ When enabled, Gemini is skipped for testing and the AI request goes to Groq, then Pollinations. The model and specialists still run first, and a failure still returns the specialist result. Turn it off again after testing.</span></div>
+            <span className="small muted">⚠ When enabled, Gemini is skipped for testing and the AI request goes to Pollinations, then Groq. The model and specialists still run first, and a failure still returns the specialist result. Turn it off again after testing.</span></div>
           <Switch label="Bypass Gemini" checked={!!data.generative_ai_bypass_gemini} disabled={busy}
             onChange={(v) => (v ? setConfirmTest(true) : save({ generative_ai_bypass_gemini: false }))} />
         </div>
         <div data-testid="bypass-status" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span className={`badge ${data.generative_ai_bypass_gemini ? 'warn' : 'ok'}`}>{data.generative_ai_bypass_gemini ? '● Gemini Bypassed' : '● Normal Mode'}</span>
-          <span className="small muted">Groq key: {data.fallbacks?.groq?.configured ? 'set on server' : 'not set on server'} · Pollinations key: {data.fallbacks?.pollinations?.configured ? 'set on server' : 'not set on server'}</span>
+          <span className="small muted">Pollinations key: {data.fallbacks?.pollinations?.configured ? 'set on server' : 'not set on server'} · Groq key: {data.fallbacks?.groq?.configured ? 'set on server' : 'not set on server'}</span>
         </div>
-        {data.generative_ai_bypass_gemini && !data.fallbacks?.groq?.configured && !data.fallbacks?.pollinations?.configured && <Alert tone="warn">Gemini is bypassed but neither Groq nor Pollinations has a key on the server, so every analysis will fall back to the specialist result.</Alert>}
+        {data.generative_ai_bypass_gemini && !data.fallbacks?.groq?.configured && !data.fallbacks?.pollinations?.configured && <Alert tone="warn">Gemini is bypassed but neither Pollinations nor Groq has a key on the server, so every analysis will fall back to the specialist result.</Alert>}
       </div>
       {confirmTest && (
         <Modal title="Bypass Gemini?" onClose={() => setConfirmTest(false)}
           actions={<><Button variant="secondary" onClick={() => setConfirmTest(false)}>Cancel</Button><Button loading={busy} onClick={async () => { await save({ generative_ai_bypass_gemini: true }); setConfirmTest(false) }}>Bypass Gemini</Button></>}>
-          <p className="muted">Gemini will be skipped for every new analysis until you turn this off. Real users' analyses will use Groq (then Pollinations) instead. Use it for a short test only.</p>
+          <p className="muted">Gemini will be skipped for every new analysis until you turn this off. Real users' analyses will use Pollinations (then Groq) instead. Use it for a short test only.</p>
         </Modal>
       )}
 

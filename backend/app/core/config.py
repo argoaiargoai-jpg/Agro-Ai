@@ -59,14 +59,14 @@ class Settings(BaseSettings):
     gemini_api_key_2: SecretStr = SecretStr("")
     gemini_model: str = "gemini-3.8-flash"
     gemini_base_url: str = "https://generativelanguage.googleapis.com"
-    ai_timeout_seconds: float = 120.0       # per HTTP attempt, for Gemini, Groq and Pollinations
-    ai_max_retries: int = 2                 # extra attempts per key/provider on timeouts, 408, 429, 500, 502, 503, 504 (exponential backoff; never on other 4xx)
-    ai_retry_budget_seconds: float = 240.0  # no further retry is started once one provider call has used this much time
+    ai_timeout_seconds: float = 40.0        # per HTTP attempt, for Gemini, Pollinations and Groq
+    ai_max_retries: int = 1                 # extra attempts per key/provider on timeouts, 408, 429, 500, 502, 503, 504 (exponential backoff; never on other 4xx)
+    ai_retry_budget_seconds: float = 40.0   # no further retry is started once one provider call has used this much time (a slow timeout is not retried)
     ai_max_concurrency: int = 3             # simultaneous provider calls
     ai_max_image_side: int = 1568           # longest side sent to the provider (metadata is stripped by re-encoding)
     ai_user_hourly_limit: int = 30          # provider calls per user per hour
 
-    # --- Generative fallbacks after Gemini: Groq first, then Pollinations (one provider call each, with bounded retries) ---
+    # --- Generative fallbacks after Gemini: Pollinations first, then Groq (one provider call each, with bounded retries) ---
     groq_api_key: SecretStr = SecretStr("")
     groq_model: str = "qwen/qwen3.8-27b"                   # Groq vision model with JSON mode (console.groq.com/docs/vision)
     groq_base_url: str = "https://api.groq.com/openai/v1"

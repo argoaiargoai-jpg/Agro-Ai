@@ -1,4 +1,4 @@
-"""Generative fallbacks after Gemini: Groq, then Pollinations, then the specialist result. All HTTP is mocked; no real key is used."""
+"""Generative fallbacks after Gemini: Pollinations, then Groq, then the specialist result. All HTTP is mocked; no real key is used."""
 import base64
 import io
 import json
@@ -174,7 +174,7 @@ def test_ping_is_text_only_single_attempt_and_never_exposes_the_key(cls, field, 
 
 def test_defaults_and_secrets():
     s = Settings(_env_file=None, groq_api_key=GKEY, pollinations_api_key=PKEY)
-    assert s.groq_model == "qwen/qwen3.8-27b" and s.pollinations_model == "openai/gpt-5.6-luna" and s.ai_timeout_seconds == 120.0
+    assert s.groq_model == "qwen/qwen3.8-27b" and s.pollinations_model == "openai/gpt-5.6-luna" and s.ai_timeout_seconds == 40.0 and s.ai_retry_budget_seconds == 40.0
     assert GKEY in s.secret_values() and PKEY in s.secret_values() and GKEY not in repr(s) and PKEY not in repr(s)
     assert "groq" not in registry.names() and "pollinations" not in registry.names()
 
@@ -188,10 +188,10 @@ def world(tmp_path, settings, monkeypatch, client, admin_auth):
     monkeypatch.setattr(analysis_service, "AI_RETRY_COOLDOWN", timedelta(0)); monkeypatch.setattr(analysis_service, "AI_FORCE_COOLDOWN", timedelta(0))
     ml_service.reset_ml_service(); analysis_workflow.reset_gate()
     saved = (dict(specialists._IDENTIFIERS), dict(specialists._DIAGNOSERS)); specialists._IDENTIFIERS.clear(); specialists._DIAGNOSERS.clear()
-    state = {"groq": Rec(chat(json.dumps(diseased("Rice Blast", crop="Rice", plant="Rice")))),
-             "poll": Rec(chat(json.dumps(diseased("Wheat Rust", crop="Wheat", plant="Wheat")))), "calls": Calls()}
-    monkeypatch.setattr(groq, "_factory", lambda s: GroqProvider(s, state["groq"].transport))
-    monkeypatch.setattr(pollinations, "_factory", lambda s: PollinationsProvider(s, state["poll"].transport))
+    state = {"first": Rec(chat(json.dumps(diseased("Rice Blast", crop="Rice", plant="Rice")))),          # Pollinations answers first
+             "second": Rec(chat(json.dumps(diseased("Wheat Rust", crop="Wheat", plant="Wheat")))), "calls": Calls()}
+    monkeypatch.setattr(pollinations, "_factory", lambda s: PollinationsProvider(s, state["first"].transport))
+    monkeypatch.setattr(groq, "_factory", lambda s: GroqProvider(s, state["second"].transport))
     state["gemini"] = Wire()
     registry.register("gemini", lambda s: GeminiProvider(s, transport=httpx.MockTransport(state["gemini"].handler)))
     yield state
@@ -224,55 +224,55 @@ def provs(client, admin_auth, aid):
 
 def test_chain_1_gemini_succeeds_so_neither_fallback_is_called(client, user_auth, world):
     _, r = analyze(client, user_auth)
-    assert r.json()["result"]["final"]["status"] == "HEALTHY" and world["groq"].requests == [] and world["poll"].requests == []
+    assert r.json()["result"]["final"]["status"] == "HEALTHY" and world["first"].requests == [] and world["second"].requests == []
 
 
 def test_chain_gemini_key_rotation_and_key_failover_come_before_any_fallback(client, user_auth, world):
     world["gemini"].plan = {K1: [503], K2: ["ok"]}
     _, r = analyze(client, user_auth)
-    assert world["gemini"].calls == ["K1", "K2"] and r.json()["status"] == "completed" and world["groq"].requests == []
+    assert world["gemini"].calls == ["K1", "K2"] and r.json()["status"] == "completed" and world["first"].requests == []
 
 
-def test_chain_2_gemini_fails_so_groq_answers_and_pollinations_is_not_called(client, user_auth, admin_auth, world):
+def test_chain_2_gemini_fails_so_pollinations_answers_and_groq_is_not_called(client, user_auth, admin_auth, world):
     gemini_down(world)
     aid, r = analyze(client, user_auth)
     assert r.json()["status"] == "completed" and r.json()["result"]["final"]["headline"] == "Rice — Rice Blast"
-    assert len(world["groq"].requests) == 1 and world["poll"].requests == []
-    sent = json.loads(world["groq"].requests[0].content)["messages"][1]["content"]
+    assert len(world["first"].requests) == 1 and world["second"].requests == []
+    sent = json.loads(world["first"].requests[0].content)["messages"][1]["content"]
     assert base64.b64decode(sent[1]["image_url"]["url"].split(",", 1)[1])[:2] == b"\xff\xd8" and "INDEPENDENT_VERIFICATION" in sent[0]["text"]   # same image + prompt
     aid, _ = analyze(client, admin_auth)
     full, pv = provs(client, admin_auth, aid)
-    assert full["ai_provider"] == "groq" and full["ai_status"] == "completed" and {"provider": "groq", "step": "guidance", "status": "ok"} in pv
+    assert full["ai_provider"] == "pollinations" and full["ai_status"] == "completed" and {"provider": "pollinations", "step": "guidance", "status": "ok"} in pv
 
 
-@pytest.mark.parametrize("groq_failure", [httpx.Response(429, json={}), httpx.Response(503, json={}), chat(""), chat("not json"), httpx.Response(401, json={})])
-def test_chain_3_groq_fails_so_pollinations_answers(client, user_auth, admin_auth, world, groq_failure):
-    gemini_down(world); world["groq"].responses = [groq_failure]
+@pytest.mark.parametrize("first_failure", [httpx.Response(429, json={}), httpx.Response(503, json={}), chat(""), chat("not json"), httpx.Response(401, json={})])
+def test_chain_3_pollinations_fails_so_groq_answers(client, user_auth, admin_auth, world, first_failure):
+    gemini_down(world); world["first"].responses = [first_failure]
     aid, r = analyze(client, admin_auth)
-    assert r.json()["result"]["final"]["headline"] == "Wheat — Wheat Rust" and len(world["poll"].requests) == 1
+    assert r.json()["result"]["final"]["headline"] == "Wheat — Wheat Rust" and len(world["second"].requests) == 1
     full, pv = provs(client, admin_auth, aid)
-    assert full["ai_provider"] == "pollinations" and {"provider": "pollinations", "step": "guidance", "status": "ok"} in pv
-    assert any(p["provider"] == "groq" and p["status"] != "ok" for p in pv)
+    assert full["ai_provider"] == "groq" and {"provider": "groq", "step": "guidance", "status": "ok"} in pv
+    assert any(p["provider"] == "pollinations" and p["status"] != "ok" for p in pv)
 
 
 def test_chain_3b_an_off_schema_groq_answer_is_not_accepted(client, user_auth, world):
-    gemini_down(world); world["groq"].responses = [chat(json.dumps({"hello": "world"}))]
+    gemini_down(world); world["first"].responses = [chat(json.dumps({"hello": "world"}))]
     _, r = analyze(client, user_auth)
     assert r.json()["result"]["final"]["headline"] == "Wheat — Wheat Rust"
 
 
 def test_chain_4_everything_fails_so_the_latest_specialist_result_is_returned(client, user_auth, world):
     with_specialist(world); gemini_down(world)
-    world["groq"].responses = [httpx.Response(503, json={})]; world["poll"].responses = [chat("")]
+    world["first"].responses = [httpx.Response(503, json={})]; world["second"].responses = [chat("")]
     _, r = analyze(client, user_auth)
     b = r.json()
     assert b["status"] == "completed" and b["result"]["stage"] == "specialist_only" and b["result"]["final"]["headline"] == "Tomato — Early Blight"
-    assert len(world["groq"].requests) == 1 and len(world["poll"].requests) == 1
+    assert len(world["first"].requests) == 1 and len(world["second"].requests) == 1
 
 
 def test_chain_4b_everything_fails_with_no_specialist_keeps_the_preliminary_result_and_retry(client, user_auth, world):
     gemini_down(world)
-    world["groq"].responses = [httpx.Response(503, json={})]; world["poll"].responses = [httpx.Response(503, json={})]
+    world["first"].responses = [httpx.Response(503, json={})]; world["second"].responses = [httpx.Response(503, json={})]
     aid, r = analyze(client, user_auth)
     b = r.json()
     assert b["status"] == "partial" and b["result"]["ml"]["classification_type"] == "DISEASE" and b["result"]["final"] is None and b["result"]["ai_error"]["retryable"] is True
@@ -282,14 +282,14 @@ def test_missing_fallback_keys_are_skipped_cleanly(client, user_auth, world, set
     monkeypatch.setattr(settings, "groq_api_key", SecretStr("")); monkeypatch.setattr(settings, "pollinations_api_key", SecretStr(""))
     with_specialist(world); gemini_down(world)
     _, r = analyze(client, user_auth)
-    assert r.json()["result"]["stage"] == "specialist_only" and world["groq"].requests == [] and world["poll"].requests == []
+    assert r.json()["result"]["stage"] == "specialist_only" and world["first"].requests == [] and world["second"].requests == []
 
 
-def test_a_missing_groq_key_still_lets_pollinations_answer(client, user_auth, world, settings, monkeypatch):
-    monkeypatch.setattr(settings, "groq_api_key", SecretStr(""))
+def test_a_missing_pollinations_key_still_lets_groq_answer(client, user_auth, world, settings, monkeypatch):
+    monkeypatch.setattr(settings, "pollinations_api_key", SecretStr(""))
     gemini_down(world)
     _, r = analyze(client, user_auth)
-    assert r.json()["result"]["final"]["headline"] == "Wheat — Wheat Rust" and world["groq"].requests == []
+    assert r.json()["result"]["final"]["headline"] == "Wheat — Wheat Rust" and world["first"].requests == []
 
 
 def test_a_fallback_alone_is_enough_when_gemini_has_no_keys(client, user_auth, world, settings, monkeypatch):
@@ -314,30 +314,30 @@ def set_bypass(client, admin_auth, on):
 def test_bypass_defaults_off_and_gemini_is_used_normally(client, admin_auth, user_auth, world):
     assert client.get(f"{V}/admin/ai", headers=admin_auth).json()["generative_ai_bypass_gemini"] is False
     analyze(client, user_auth)
-    assert world["gemini"].calls == ["K1"] and world["groq"].requests == []
+    assert world["gemini"].calls == ["K1"] and world["first"].requests == []
 
 
-def test_bypass_on_skips_gemini_keeps_specialists_and_goes_to_groq(client, admin_auth, user_auth, world, caplog):
+def test_bypass_on_skips_gemini_keeps_specialists_and_goes_to_pollinations(client, admin_auth, user_auth, world, caplog):
     caplog.set_level(logging.WARNING)
     with_specialist(world)
     assert set_bypass(client, admin_auth, True)["generative_ai_bypass_gemini"] is True
     aid, r = analyze(client, admin_auth)
-    assert world["gemini"].calls == [] and len(world["groq"].requests) == 1 and world["poll"].requests == []
+    assert world["gemini"].calls == [] and len(world["first"].requests) == 1 and world["second"].requests == []
     assert world["calls"].order[0] in ("kindwise", "plantnet") and "Gemini bypass enabled" in caplog.text
     full, pv = provs(client, admin_auth, aid)
-    assert full["result"]["test_mode"] == "bypass_gemini" and full["ai_provider"] == "groq" and {"provider": "gemini", "step": "guidance", "status": "bypassed"} in pv
+    assert full["result"]["test_mode"] == "bypass_gemini" and full["ai_provider"] == "pollinations" and {"provider": "gemini", "step": "guidance", "status": "bypassed"} in pv
 
 
-def test_bypass_on_groq_fails_so_pollinations_answers(client, admin_auth, user_auth, world):
-    set_bypass(client, admin_auth, True); world["groq"].responses = [httpx.Response(503, json={})]
+def test_bypass_on_pollinations_fails_so_groq_answers(client, admin_auth, user_auth, world):
+    set_bypass(client, admin_auth, True); world["first"].responses = [httpx.Response(503, json={})]
     aid, r = analyze(client, admin_auth)
     full, _ = provs(client, admin_auth, aid)
-    assert world["gemini"].calls == [] and full["ai_provider"] == "pollinations" and r.json()["result"]["final"]["headline"] == "Wheat — Wheat Rust"
+    assert world["gemini"].calls == [] and full["ai_provider"] == "groq" and r.json()["result"]["final"]["headline"] == "Wheat — Wheat Rust"
 
 
 def test_bypass_on_all_fail_returns_the_specialist_result_and_never_calls_gemini(client, admin_auth, user_auth, world):
     with_specialist(world); set_bypass(client, admin_auth, True)
-    world["groq"].responses = [chat("")]; world["poll"].responses = [httpx.Response(500, json={})]
+    world["first"].responses = [chat("")]; world["second"].responses = [httpx.Response(500, json={})]
     _, r = analyze(client, user_auth)
     assert world["gemini"].calls == [] and r.json()["result"]["stage"] == "specialist_only" and r.json()["result"]["final"]["headline"] == "Tomato — Early Blight"
 
@@ -345,7 +345,7 @@ def test_bypass_on_all_fail_returns_the_specialist_result_and_never_calls_gemini
 def test_bypass_off_again_restores_gemini_first(client, admin_auth, user_auth, world):
     set_bypass(client, admin_auth, True); set_bypass(client, admin_auth, False)
     analyze(client, user_auth)
-    assert world["gemini"].calls == ["K1"] and world["groq"].requests == []
+    assert world["gemini"].calls == ["K1"] and world["first"].requests == []
 
 
 # ---------------------------------------------------------------------------------------- customers see nothing provider-specific
@@ -362,8 +362,8 @@ def test_customer_responses_are_provider_neutral_in_every_branch(client, user_au
 
 def test_provider_keys_never_reach_logs_or_responses(client, user_auth, admin_auth, world, caplog):
     caplog.set_level(logging.DEBUG)
-    gemini_down(world); world["groq"].responses = [httpx.Response(401, json={"error": {"message": "bad key " + GKEY}})]
-    world["poll"].responses = [httpx.Response(500, json={"error": {"message": "boom " + PKEY}})]
+    gemini_down(world); world["first"].responses = [httpx.Response(401, json={"error": {"message": "bad key " + PKEY}})]
+    world["second"].responses = [httpx.Response(500, json={"error": {"message": "boom " + GKEY}})]
     with_specialist(world)
     aid, r = analyze(client, admin_auth)
     blob = r.text + client.get(f"{V}/analyses/{aid}", headers=admin_auth).text + client.get(f"{V}/admin/ai", headers=admin_auth).text + caplog.text

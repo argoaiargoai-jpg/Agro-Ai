@@ -29,7 +29,7 @@ def by_id(body):
 def test_admin_receives_all_five_providers_with_safe_metadata(client, admin_auth, all_keys):
     body = client.get(f"{V}/admin/ai", headers=admin_auth).json()
     w = by_id(body)
-    assert list(w) == ["gemini", "kindwise", "plantnet", "groq", "pollinations"]
+    assert list(w) == ["gemini", "kindwise", "plantnet", "pollinations", "groq"]
     assert w["gemini"] == {"id": "gemini", "name": "Google Gemini", "purpose": "AI verification & guidance (main AI step)", "configured": True, "model": "gemini-3.8-flash",
                            "keys": {"configured": 2, "of": 2}, "state": "primary", "testable": True}
     assert w["kindwise"]["configured"] is True and w["kindwise"]["state"] == "available" and "model" not in w["kindwise"] and w["kindwise"]["testable"] is False

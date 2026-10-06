@@ -136,13 +136,13 @@ def _validated(response) -> AIAnalysis:
 
 
 def _fallback_chain(request, evidence: routing.Evidence, settings: Settings):
-    """The generative fallbacks, in order: Groq, then Pollinations. Each gets the SAME request Gemini got (same image, same prompt) and is tried
+    """The generative fallbacks, in order: Pollinations, then Groq. Each gets the SAME request Gemini got (same image, same prompt) and is tried
     once (with its own bounded retries). A provider that is not configured, errors, or returns an unusable answer (empty / not JSON / not our
     schema) counts as failed and the next one is tried. Returns (AIAnalysis | None, provider, last error | None, model | None); `provider` is the
     one that answered, or the last one tried. Every outcome is recorded for the admin; nothing here ever contains a key."""
     from app.ai.safety import redact
     last_provider, last_err = None, None
-    for build in (groq.build, pollinations.build):
+    for build in (pollinations.build, groq.build):
         fb = build(settings)
         last_provider = fb
         if not fb.is_configured():
@@ -165,10 +165,10 @@ def _fallback_chain(request, evidence: routing.Evidence, settings: Settings):
 
 def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Settings, on_stage=None, bypass_gemini: bool = False) -> tuple[AIAnalysis | None, AnalysisReport, str, dict]:
     """Our model's confidence picks the specialist path (routing.py); then Gemini ALWAYS gets the ORIGINAL image, our model's result as a hint and
-    whatever evidence the specialists produced. If Gemini fails (both keys, after their retries), Groq is tried, then Pollinations (same request); if
+    whatever evidence the specialists produced. If Gemini fails (both keys, after their retries), Pollinations is tried, then Groq (same request); if
     those fail too, the latest successful specialist result is returned as the final result (ai is None then); with no specialist result the
     ProviderError propagates (existing behaviour: preliminary result + retry). With `bypass_gemini` (admin switch) Gemini is skipped and the chain
-    starts at Groq. Returns (ai, report, case, info); info is internal bookkeeping. `on_stage(name)` is called as each real step starts."""
+    starts at Pollinations. Returns (ai, report, case, info); info is internal bookkeeping. `on_stage(name)` is called as each real step starts."""
     jpeg, mime = imaging.prepare_for_provider(image, settings.ai_max_image_side, settings.ml_max_pixels)
     route = routing.decide(ml, settings)
     evidence = routing.gather(route, jpeg, mime, settings, on_stage)         # the same re-encoded image bytes go to every visual provider
@@ -176,7 +176,7 @@ def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Setting
     info = {"route": route, "plan_done": list(evidence.steps_done), "specialists": evidence.internal()}
     if on_stage:
         on_stage("guidance")
-    if bypass_gemini:                                # ADMIN SWITCH: Gemini is skipped; Groq -> Pollinations -> specialist result
+    if bypass_gemini:                                # ADMIN SWITCH: Gemini is skipped; Pollinations -> Groq -> specialist result
         log.warning("Gemini bypass enabled: skipping Gemini")
         evidence.providers.append({"provider": provider.name, "step": "guidance", "status": "bypassed"})
         ai, fb, err, routed = _fallback_chain(request, evidence, settings)
@@ -202,7 +202,7 @@ def run_guidance(provider: AIProvider, ml: dict, image: bytes, settings: Setting
         ai = _validated(response)
     except ProviderError as exc:
         evidence.providers.append({"provider": provider.name, "step": "guidance", "status": exc.ai_status})
-        ai, fallback, err, model = _fallback_chain(request, evidence, settings)                 # Gemini failed: Groq, then Pollinations
+        ai, fallback, err, model = _fallback_chain(request, evidence, settings)                 # Gemini failed: Pollinations, then Groq
         if ai is not None:
             log.warning("AI guidance came from %s because Gemini failed (%s)", fallback.display_name, exc.ai_status)
             info.update(plan_done=evidence.steps_done + ["guidance"], specialists=evidence.internal(), ai_used={"provider": fallback.name, "model": model or fallback.model})

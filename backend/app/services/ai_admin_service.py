@@ -22,7 +22,7 @@ _lock = threading.Lock()
 def _workflow(db: Session, enabled: bool, active: str, bypass: bool) -> list[dict]:
     """Status of EVERY provider the analysis workflow can use. Safe metadata only (counts and booleans, never a key). `state`:
     primary = the selected main AI provider; available = configured and used by the workflow when its turn comes; fallback = Groq / Pollinations
-    (used only when the provider before them fails, or first while Gemini is bypassed); bypassed = Gemini while the admin bypass switch is on;
+    (used only when the provider before them fails; Pollinations is first, also while Gemini is bypassed); bypassed = Gemini while the admin bypass switch is on;
     disabled = AI guidance switched off; not_configured = no key on the server."""
     s = get_settings()
     keys = len(s.gemini_keys())
@@ -37,10 +37,10 @@ def _workflow(db: Session, enabled: bool, active: str, bypass: bool) -> list[dic
          "state": "available" if kindwise else "not_configured", "testable": False},
         {"id": "plantnet", "name": "Pl@ntNet", "purpose": "Plant identification specialist", "configured": plantnet,
          "state": "available" if plantnet else "not_configured", "testable": False},
-        {"id": "groq", "name": "Groq", "purpose": "AI fallback 1 (after Gemini)", "configured": groq_ok, "model": s.groq_model,
-         "state": "not_configured" if not groq_ok else "disabled" if not enabled else "fallback", "testable": True},
-        {"id": "pollinations", "name": "Pollinations", "purpose": "AI fallback 2 (after Groq)", "configured": poll_ok, "model": s.pollinations_model,
+        {"id": "pollinations", "name": "Pollinations", "purpose": "AI fallback 1 (after Gemini)", "configured": poll_ok, "model": s.pollinations_model,
          "state": "not_configured" if not poll_ok else "disabled" if not enabled else "fallback", "testable": True},
+        {"id": "groq", "name": "Groq", "purpose": "AI fallback 2 (after Pollinations)", "configured": groq_ok, "model": s.groq_model,
+         "state": "not_configured" if not groq_ok else "disabled" if not enabled else "fallback", "testable": True},
     ]
 
 
@@ -58,8 +58,8 @@ def overview(db: Session) -> dict:
         "enabled": enabled, "active_provider": active, "state": state, "providers": providers,
         "generative_ai_bypass_gemini": bool(settings_service.get_value(db, "generative_ai_bypass_gemini")),
         "workflow": _workflow(db, enabled, active, bool(settings_service.get_value(db, "generative_ai_bypass_gemini"))),
-        "fallbacks": {"groq": {"configured": groq.build(s).is_configured(), "model": s.groq_model},          # never the keys
-                      "pollinations": {"configured": pollinations.build(s).is_configured(), "model": s.pollinations_model}},
+        "fallbacks": {"pollinations": {"configured": pollinations.build(s).is_configured(), "model": s.pollinations_model},          # never the keys
+                      "groq": {"configured": groq.build(s).is_configured(), "model": s.groq_model}},
         "secret_source": "environment",          # keys are set in the server environment, never through the UI or database
         "limits": {"timeout_seconds": s.ai_timeout_seconds, "max_retries": s.ai_max_retries, "max_concurrency": s.ai_max_concurrency,
                    "user_hourly_limit": s.ai_user_hourly_limit, "max_image_side_px": s.ai_max_image_side},

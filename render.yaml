@@ -59,9 +59,9 @@ services:
         sync: false
       - key: GEMINI_API_KEY_2
         sync: false
-      - key: GROQ_API_KEY              # optional generative fallback 1 (after Gemini fails)
+      - key: POLLINATIONS_API_KEY      # optional generative fallback 1 (after Gemini fails)
         sync: false
-      - key: POLLINATIONS_API_KEY      # optional generative fallback 2 (after Groq fails)
+      - key: GROQ_API_KEY              # optional generative fallback 2 (after Pollinations fails)
         sync: false
       - key: PLANTNET_API_KEY          # specialist providers (optional; skipped when unset): plant identification
         sync: false
